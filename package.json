@@ -1,0 +1,39 @@
+{
+  "name": "flashy-ai",
+  "displayName": "FlashyAI",
+  "version": "0.1.0",
+  "description": "One click to unleash parallel AI agents that search every site for you — and you watch them work live.",
+  "scripts": {
+    "dev": "plasmo dev",
+    "build": "plasmo build",
+    "package": "plasmo package"
+  },
+  "dependencies": {
+    "plasmo": "^0.90.5",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@types/chrome": "^0.0.287",
+    "typescript": "^5.7.0",
+    "tailwindcss": "^3.4.0",
+    "postcss": "^8.4.0",
+    "autoprefixer": "^10.4.0"
+  },
+  "manifest": {
+    "permissions": [
+      "activeTab",
+      "sidePanel",
+      "storage",
+      "scripting"
+    ],
+    "host_permissions": [
+      "https://*/*"
+    ],
+    "side_panel": {
+      "default_path": "sidepanel.html"
+    }
+  }
+}

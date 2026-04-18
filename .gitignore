@@ -1,0 +1,9 @@
+node_modules/
+.plasmo/
+build/
+.env
+.env.local
+.env.*
+!.env.example
+*.pem
+package-lock.json
