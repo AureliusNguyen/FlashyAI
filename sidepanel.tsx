@@ -1,10 +1,11 @@
-import React, { useCallback, useEffect, useState } from "react"
+import React, { useCallback, useEffect, useMemo, useState } from "react"
 import { AgentGrid } from "./components/AgentGrid"
 import { BestDeal } from "./components/BestDeal"
 import type { AgentState } from "./lib/types"
 import "./style.css"
 
 type Phase = "idle" | "capturing" | "extracting" | "running" | "complete" | "error"
+type Tab = "exact" | "similar"
 
 function SidePanel() {
   const [phase, setPhase] = useState<Phase>("idle")
@@ -13,6 +14,22 @@ function SidePanel() {
   const [originalPrice, setOriginalPrice] = useState("")
   const [error, setError] = useState("")
   const [hasKeys, setHasKeys] = useState(false)
+  const [activeTab, setActiveTab] = useState<Tab>("exact")
+  const [hasSimilarSearch, setHasSimilarSearch] = useState(false)
+
+  // Filter agents by tab
+  const exactAgents = useMemo(() => agents.filter(a => a.matchType === "exact"), [agents])
+  const similarAgents = useMemo(() => agents.filter(a => a.matchType === "similar"), [agents])
+
+  const exactFoundCount = useMemo(() => exactAgents.filter(a => a.status === "complete").length, [exactAgents])
+  const similarFoundCount = useMemo(() => similarAgents.filter(a => a.status === "complete").length, [similarAgents])
+
+  // Auto-switch to similar tab when similar search starts
+  useEffect(() => {
+    if (hasSimilarSearch && exactFoundCount === 0 && similarAgents.length > 0) {
+      setActiveTab("similar")
+    }
+  }, [hasSimilarSearch, exactFoundCount, similarAgents.length])
 
   // Check for API keys on mount
   useEffect(() => {
@@ -29,6 +46,8 @@ function SidePanel() {
           setPhase("extracting")
           setAgents([])
           setError("")
+          setActiveTab("exact")
+          setHasSimilarSearch(false)
           break
 
         case "INTENT_EXTRACTED": {
@@ -40,6 +59,10 @@ function SidePanel() {
 
         case "AGENT_UPDATE":
           setAgents(message.payload as AgentState[])
+          break
+
+        case "SIMILAR_SEARCH_START":
+          setHasSimilarSearch(true)
           break
 
         case "ORCHESTRATION_COMPLETE":
@@ -64,7 +87,6 @@ function SidePanel() {
     console.log("[FlashyAI:SidePanel] Flash It! clicked")
 
     try {
-      // Request page capture from content script
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
       console.log("[FlashyAI:SidePanel] Active tab:", tab?.id, tab?.url)
 
@@ -74,7 +96,6 @@ function SidePanel() {
         return
       }
 
-      // Check if this is a page we can work with
       const url = tab.url || ""
       if (url.startsWith("chrome://") || url.startsWith("chrome-extension://") || url.startsWith("about:") || url === "") {
         setError("Cannot capture Chrome internal pages. Navigate to a product page first (e.g. Amazon, Best Buy, etc.).")
@@ -82,7 +103,6 @@ function SidePanel() {
         return
       }
 
-      // Check if user is on a supported product/shopping site
       const hostname = new URL(url).hostname.replace("www.", "")
       const SUPPORTED_SITES = [
         "amazon.com", "walmart.com", "ebay.com", "target.com",
@@ -100,24 +120,11 @@ function SidePanel() {
         return
       }
 
-      // Try to inject content script if it's not already there
       let capture
       try {
         capture = await chrome.tabs.sendMessage(tab.id, { type: "REQUEST_CAPTURE" })
       } catch {
-        // Content script not loaded — inject it and retry
-        console.log("[FlashyAI:SidePanel] Content script not found, injecting...")
-        try {
-          await chrome.scripting.executeScript({
-            target: { tabId: tab.id },
-            files: ["capture.6fe304b9.js"] // fallback won't work with hashed names
-          })
-        } catch {
-          // scripting API may not work, try programmatic injection via service worker
-        }
-
-        // Alternative: capture directly from here using scripting API
-        console.log("[FlashyAI:SidePanel] Falling back to direct scripting capture...")
+        console.log("[FlashyAI:SidePanel] Content script not found, falling back...")
         const results = await chrome.scripting.executeScript({
           target: { tabId: tab.id },
           func: () => {
@@ -153,17 +160,13 @@ function SidePanel() {
         events: capture.events?.length
       })
 
-      // Save original price if extracted later
       if (capture.html) {
         const priceMatch = capture.html.match(/\$[\d,]+\.?\d*/)?.[0]
         if (priceMatch) {
           setOriginalPrice(priceMatch)
-          console.log("[FlashyAI:SidePanel] Detected price:", priceMatch)
         }
       }
 
-      // Send to service worker for orchestration
-      console.log("[FlashyAI:SidePanel] Sending to service worker for orchestration...")
       chrome.runtime.sendMessage({ type: "FLASH_IT", payload: capture })
     } catch (err) {
       console.error("[FlashyAI:SidePanel] Capture error:", err)
@@ -173,6 +176,7 @@ function SidePanel() {
   }, [])
 
   const isWorking = phase === "capturing" || phase === "extracting" || phase === "running"
+  const showTabs = agents.length > 0
 
   return (
     <div className="min-h-screen bg-[#0a0a0f] flex flex-col">
@@ -189,7 +193,7 @@ function SidePanel() {
           <div className="p-3 rounded-lg bg-yellow-900/20 border border-yellow-800/50 text-sm text-yellow-300">
             <p className="font-medium mb-1">API keys needed</p>
             <p className="text-xs text-yellow-400/70">
-              Right-click the extension icon → Options to configure your TinyFish and Featherless API keys.
+              Right-click the extension icon &rarr; Options to configure your TinyFish and Featherless API keys.
             </p>
           </div>
         ) : (
@@ -230,9 +234,73 @@ function SidePanel() {
         </div>
       )}
 
-      {/* Agent Grid */}
+      {/* Tabs */}
+      {showTabs && (
+        <div className="flex border-b border-zinc-800">
+          <button
+            onClick={() => setActiveTab("exact")}
+            className={`flex-1 py-2.5 text-xs font-medium transition-colors relative ${
+              activeTab === "exact"
+                ? "text-zinc-100"
+                : "text-zinc-500 hover:text-zinc-300"
+            }`}
+          >
+            Exact Match
+            {exactFoundCount > 0 && (
+              <span className="ml-1.5 px-1.5 py-0.5 rounded-full bg-green-500/20 text-green-400 text-[10px]">
+                {exactFoundCount}
+              </span>
+            )}
+            {activeTab === "exact" && (
+              <div className="absolute bottom-0 left-2 right-2 h-0.5 bg-gradient-to-r from-violet-500 to-cyan-500 rounded-full" />
+            )}
+          </button>
+          <button
+            onClick={() => setActiveTab("similar")}
+            className={`flex-1 py-2.5 text-xs font-medium transition-colors relative ${
+              activeTab === "similar"
+                ? "text-zinc-100"
+                : "text-zinc-500 hover:text-zinc-300"
+            }`}
+          >
+            Similar
+            {similarFoundCount > 0 && (
+              <span className="ml-1.5 px-1.5 py-0.5 rounded-full bg-violet-500/20 text-violet-400 text-[10px]">
+                {similarFoundCount}
+              </span>
+            )}
+            {!hasSimilarSearch && similarAgents.length === 0 && (
+              <span className="ml-1.5 text-zinc-600 text-[10px]">--</span>
+            )}
+            {activeTab === "similar" && (
+              <div className="absolute bottom-0 left-2 right-2 h-0.5 bg-gradient-to-r from-violet-500 to-cyan-500 rounded-full" />
+            )}
+          </button>
+        </div>
+      )}
+
+      {/* Agent Grid (filtered by tab) */}
       <div className="flex-1 overflow-y-auto">
-        <AgentGrid agents={agents} />
+        {activeTab === "exact" ? (
+          <AgentGrid agents={exactAgents} />
+        ) : (
+          similarAgents.length > 0 ? (
+            <AgentGrid agents={similarAgents} />
+          ) : hasSimilarSearch ? (
+            <div className="flex items-center justify-center p-8">
+              <div className="flex flex-col items-center gap-2">
+                <div className="w-6 h-6 border-2 border-zinc-600 border-t-violet-400 rounded-full animate-spin" />
+                <span className="text-xs text-zinc-500">Searching for alternatives...</span>
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center justify-center p-8">
+              <p className="text-xs text-zinc-600 text-center">
+                Similar products will appear here if exact matches aren't found.
+              </p>
+            </div>
+          )
+        )}
       </div>
 
       {/* Best Deal Banner */}

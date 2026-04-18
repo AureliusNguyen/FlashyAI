@@ -24,6 +24,7 @@ export interface ExtractedIntent {
   attributes: Record<string, string>
   currentPrice?: string
   sourceSite: string
+  category?: string
 }
 
 export interface AgentGoal {
@@ -39,12 +40,14 @@ export interface IntentResponse {
 
 // === Agent State ===
 
-export type AgentStatus = "queued" | "connecting" | "streaming" | "complete" | "error"
+export type AgentStatus = "queued" | "connecting" | "streaming" | "complete" | "not_found" | "error"
+export type MatchType = "exact" | "similar"
 
 export interface AgentState {
   id: string
   site: string
   status: AgentStatus
+  matchType: MatchType
   streamingUrl?: string
   result?: AgentResult
   error?: string
@@ -67,6 +70,7 @@ export type MessageType =
   | "ORCHESTRATION_START"
   | "ORCHESTRATION_COMPLETE"
   | "INTENT_EXTRACTED"
+  | "SIMILAR_SEARCH_START"
   | "ERROR"
 
 export interface ExtensionMessage {

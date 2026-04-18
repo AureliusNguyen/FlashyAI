@@ -10,6 +10,7 @@ const STATUS_COLORS: Record<string, string> = {
   connecting: "bg-yellow-500/20 text-yellow-400",
   streaming: "bg-blue-500/20 text-blue-400",
   complete: "bg-green-500/20 text-green-400",
+  not_found: "bg-orange-500/20 text-orange-400",
   error: "bg-red-500/20 text-red-400"
 }
 
@@ -17,13 +18,15 @@ const STATUS_LABELS: Record<string, string> = {
   queued: "Queued",
   connecting: "Connecting...",
   streaming: "Live",
-  complete: "Done",
+  complete: "Found",
+  not_found: "Not Available",
   error: "Failed"
 }
 
 export function AgentCard({ agent }: AgentCardProps) {
   const isLive = agent.status === "streaming" && agent.streamingUrl
   const isDone = agent.status === "complete"
+  const isNotFound = agent.status === "not_found"
   const isError = agent.status === "error"
 
   return (
@@ -34,10 +37,16 @@ export function AgentCard({ agent }: AgentCardProps) {
           <div className={`w-2 h-2 rounded-full ${
             isLive ? "bg-blue-400 animate-pulse" :
             isDone ? "bg-green-400" :
+            isNotFound ? "bg-orange-400" :
             isError ? "bg-red-400" :
             "bg-zinc-600"
           }`} />
           <span className="text-sm font-medium text-zinc-200">{agent.site}</span>
+          {agent.matchType === "similar" && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/20 text-violet-400">
+              similar
+            </span>
+          )}
         </div>
         <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_COLORS[agent.status] || ""}`}>
           {STATUS_LABELS[agent.status] || agent.status}
@@ -71,6 +80,11 @@ export function AgentCard({ agent }: AgentCardProps) {
                 View on {agent.site}
               </a>
             )}
+          </div>
+        ) : isNotFound ? (
+          <div className="absolute inset-0 flex flex-col items-center justify-center p-4">
+            <p className="text-sm text-orange-400 font-medium">Not available</p>
+            <p className="text-xs text-zinc-500 mt-1">Searching for similar products...</p>
           </div>
         ) : isError ? (
           <div className="absolute inset-0 flex items-center justify-center p-4">

@@ -5,8 +5,10 @@ export {}
 
 // Auto-load API keys from build-time env vars into chrome.storage on install
 chrome.runtime.onInstalled.addListener(() => {
-  const tinyfishKey = process.env.PLASMO_PUBLIC_TINYFISH_API_KEY || ""
-  const featherlessKey = process.env.PLASMO_PUBLIC_FEATHERLESS_API_KEY || ""
+  // @ts-ignore — Plasmo replaces process.env at build time
+  const tinyfishKey: string = process.env.PLASMO_PUBLIC_TINYFISH_API_KEY || ""
+  // @ts-ignore — Plasmo replaces process.env at build time
+  const featherlessKey: string = process.env.PLASMO_PUBLIC_FEATHERLESS_API_KEY || ""
   console.log("[FlashyAI:BG] Extension installed. Keys from env:", {
     hasTinyfish: !!tinyfishKey,
     hasFeatherless: !!featherlessKey
@@ -76,8 +78,15 @@ async function handleFlashIt(capture: PageCapture) {
         payload: { type, product }
       })
     },
+    onSimilarSearchStart: () => {
+      console.log("[FlashyAI:BG] Similar search starting...")
+      broadcast({
+        type: "SIMILAR_SEARCH_START",
+        payload: {}
+      })
+    },
     onAgentUpdate: (agents: AgentState[]) => {
-      console.log("[FlashyAI:BG] Agent update:", agents.map(a => `${a.site}:${a.status}`))
+      console.log("[FlashyAI:BG] Agent update:", agents.map(a => `${a.site}:${a.matchType}:${a.status}`))
       broadcast({
         type: "AGENT_UPDATE",
         payload: agents

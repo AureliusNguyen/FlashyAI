@@ -14,16 +14,20 @@ const SYSTEM_PROMPT = `You are an intent extraction engine for a shopping compar
 
 Given a webpage's URL, title, HTML content, and user interaction events, extract:
 1. What product/item the user is looking at or searching for
-2. Key attributes (size, color, model, etc.)
-3. The current price on this site
-
-Then generate search goals for each target site. Each goal should be a natural language instruction telling a browser agent exactly what to do on that site to find the same or equivalent product and extract its price.
+2. The product CATEGORY (e.g., "smart speakers", "running shoes", "laptops", "headphones")
+3. Key attributes the user cares about — infer from the product AND from user interactions:
+   - If user clicked a color filter → they care about color
+   - If user selected a size → they care about size
+   - If user sorted by price → they care about price range
+   - If user clicked a brand filter → they care about brand
+4. The current price on this site
 
 IMPORTANT: Return ONLY valid JSON with this exact structure:
 {
   "intent": {
     "type": "product_search" | "general_search" | "unknown",
     "product": "product name",
+    "category": "product category (e.g., smart speakers, running shoes)",
     "attributes": { "key": "value" },
     "currentPrice": "$XX.XX",
     "sourceSite": "domain.com"
@@ -32,15 +36,20 @@ IMPORTANT: Return ONLY valid JSON with this exact structure:
     {
       "site": "site name",
       "url": "https://site.com",
-      "goal": "Natural language instruction for the agent. Be specific: tell it to search for the exact product, what to look for, and to return JSON with {product, price, available, url}"
+      "goal": "Natural language instruction for the agent"
     }
   ]
 }
 
-Make each goal specific and actionable. The agent will navigate a real browser, so include:
-- What to search for (exact product name/keywords)
-- What to extract (price, availability, URL)
-- The return format (JSON with product, price, available, url fields)`
+For attributes, include things like:
+- "color": "white"
+- "size": "10"
+- "brand": "Nike"
+- "priceRange": "under $50"
+- "condition": "new"
+- Any other relevant product attributes
+
+The agentGoals should tell a browser agent to find the EXACT same product. Be specific about what to search for and what to extract.`
 
 /**
  * Call Featherless LLM to extract intent from page capture
