@@ -35,7 +35,8 @@ export async function runTinyFishAgent(
       },
       body: JSON.stringify({
         url: goal.url,
-        goal: goal.goal
+        goal: goal.goal,
+        browser_profile: "stealth"
       })
     })
     console.log(`[FlashyAI:TinyFish] [${goal.site}] Response status: ${response.status} ${response.statusText}`)
@@ -234,10 +235,13 @@ function parseResult(raw: unknown): AgentResult {
 
   const available = flat.available !== false && flat.in_stock !== false && flat.inStock !== false && flat.exact_match !== false
 
-  console.log(`[FlashyAI:TinyFish] parseResult:`, { product, price, available, url, rawKeys: Object.keys(obj) })
+  console.log(`[FlashyAI:TinyFish] parseResult:`, { product, price, available, url, rawKeys: Object.keys(flat) })
 
   return { product, price, available, url, raw }
 }
+
+// Exported for testing
+export { parseResult, flattenObj }
 
 /**
  * Dispatch multiple agents in parallel.

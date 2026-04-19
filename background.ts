@@ -41,74 +41,59 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   return false
 })
 
+// Session ID to cancel stale orchestrations when user re-dispatches
+let currentSessionId = 0
+
 async function handleFlashIt(capture: PageCapture) {
-  console.log("[FlashyAI:BG] handleFlashIt called:", {
+  const sessionId = ++currentSessionId
+  console.log("[FlashyAI:BG] handleFlashIt called (session", sessionId, "):", {
     url: capture.url,
     title: capture.title,
     htmlLength: capture.html?.length,
     eventCount: capture.events?.length
   })
 
-  // Get API keys from storage
+  // Helper: only broadcast if this session is still current
+  const safeBroadcast = (message: { type: string; payload?: unknown }) => {
+    if (sessionId !== currentSessionId) {
+      console.log("[FlashyAI:BG] Stale session", sessionId, "— ignoring", message.type)
+      return
+    }
+    broadcast(message)
+  }
+
   const keys = await chrome.storage.local.get(["tinyfishKey", "featherlessKey"])
-  console.log("[FlashyAI:BG] API keys loaded:", {
-    hasTinyfish: !!keys.tinyfishKey,
-    hasFeatherless: !!keys.featherlessKey
-  })
 
   if (!keys.tinyfishKey || !keys.featherlessKey) {
-    broadcast({
-      type: "ERROR",
-      payload: "API keys not configured. Click the extension icon and go to Settings."
-    })
+    safeBroadcast({ type: "ERROR", payload: "API keys not configured." })
     return
   }
 
-  broadcast({
+  safeBroadcast({
     type: "ORCHESTRATION_START",
     payload: { url: capture.url, title: capture.title }
   })
 
-  console.log("[FlashyAI:BG] Starting orchestration...")
+  console.log("[FlashyAI:BG] Starting orchestration (session", sessionId, ")...")
   await orchestrate(capture, keys.featherlessKey, keys.tinyfishKey, {
     onIntentExtracted: (type, product) => {
-      console.log("[FlashyAI:BG] Intent extracted:", { type, product })
-      broadcast({
-        type: "INTENT_EXTRACTED",
-        payload: { type, product }
-      })
+      safeBroadcast({ type: "INTENT_EXTRACTED", payload: { type, product } })
     },
     onSimilarSearchStart: () => {
-      console.log("[FlashyAI:BG] Similar search starting...")
-      broadcast({
-        type: "SIMILAR_SEARCH_START",
-        payload: {}
-      })
+      safeBroadcast({ type: "SIMILAR_SEARCH_START", payload: {} })
     },
     onAgentUpdate: (agents: AgentState[]) => {
-      console.log("[FlashyAI:BG] Agent update:", agents.map(a => `${a.site}:${a.matchType}:${a.status}`))
-      broadcast({
-        type: "AGENT_UPDATE",
-        payload: agents
-      })
+      safeBroadcast({ type: "AGENT_UPDATE", payload: agents })
     },
     onComplete: (agents: AgentState[]) => {
-      console.log("[FlashyAI:BG] Orchestration complete:", agents.map(a => ({
-        site: a.site,
-        status: a.status,
-        price: a.result?.price
+      console.log("[FlashyAI:BG] Orchestration complete (session", sessionId, "):", agents.map(a => ({
+        site: a.site, status: a.status, price: a.result?.price
       })))
-      broadcast({
-        type: "ORCHESTRATION_COMPLETE",
-        payload: agents
-      })
+      safeBroadcast({ type: "ORCHESTRATION_COMPLETE", payload: agents })
     },
     onError: (error: string) => {
       console.error("[FlashyAI:BG] Orchestration error:", error)
-      broadcast({
-        type: "ERROR",
-        payload: error
-      })
+      safeBroadcast({ type: "ERROR", payload: error })
     }
   })
 }

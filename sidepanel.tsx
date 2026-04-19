@@ -25,11 +25,13 @@ function SidePanel() {
   const totalAgents = agents.length
   const completedAgents = agents.filter(a => ["complete", "not_found", "error"].includes(a.status)).length
 
+  // Only auto-switch to variants if ALL exact agents are done and none found results
+  const allExactDone = exactAgents.length > 0 && exactAgents.every(a => ["complete", "not_found", "error"].includes(a.status))
   useEffect(() => {
-    if (hasSimilarSearch && exactFoundCount === 0 && similarAgents.length > 0) {
+    if (allExactDone && exactFoundCount === 0 && similarAgents.length > 0) {
       setActiveTab("similar")
     }
-  }, [hasSimilarSearch, exactFoundCount, similarAgents.length])
+  }, [allExactDone, exactFoundCount, similarAgents.length])
 
   useEffect(() => {
     chrome.storage.local.get(["tinyfishKey", "featherlessKey"], (result) => {
@@ -44,6 +46,8 @@ function SidePanel() {
           setPhase("extracting")
           setAgents([])
           setError("")
+          setProduct("")
+          setOriginalPrice("")
           setActiveTab("exact")
           setHasSimilarSearch(false)
           break
@@ -97,7 +101,7 @@ function SidePanel() {
         "macys.com", "nike.com", "adidas.com"
       ]
       if (!SUPPORTED_SITES.some(s => hostname.includes(s))) {
-        setError(`TARGET "${hostname.toUpperCase()}" NOT IN DATABASE.\n\nCOMPATIBLE: AMAZON, EBAY, TARGET, BEST BUY, NEWEGG, COSTCO`)
+        setError(`TARGET "${hostname.toUpperCase()}" NOT IN DATABASE.\n\nCOMPATIBLE: AMAZON, EBAY, TARGET, NEWEGG, COSTCO`)
         setPhase("error")
         return
       }
@@ -184,16 +188,16 @@ function SidePanel() {
         ) : (
           <button
             onClick={handleFlashIt}
-            disabled={isWorking}
+            disabled={phase === "capturing" || phase === "extracting"}
             className={`w-full py-2.5 px-4 font-mono-display text-[11px] tracking-[0.25em] uppercase transition-all border ${
-              isWorking
+              phase === "capturing" || phase === "extracting"
                 ? "bg-surface text-muted-foreground border-border cursor-not-allowed"
                 : "bg-primary/10 text-primary border-primary hover:bg-primary/20"
             }`}
           >
             {phase === "capturing" ? "SCANNING TARGET..." :
              phase === "extracting" ? "ANALYZING TELEMETRY..." :
-             phase === "running" ? "PROBES ACTIVE..." :
+             phase === "running" ? "▸ RE-DISPATCH PROBES" :
              "▸ DISPATCH PROBES"}
           </button>
         )}
@@ -264,9 +268,26 @@ function SidePanel() {
         </div>
       )}
 
-      {/* Agent Grid */}
+      {/* Agent Grid — hidden during idle, shows loading or agents */}
+      {phase !== "idle" && (
       <div className="flex-1 overflow-y-auto">
-        {activeTab === "exact" ? (
+        {isWorking && agents.length === 0 ? (
+          <div className="flex flex-col items-center justify-center p-10 gap-4">
+            <RadarSpinner />
+            <div className="text-center">
+              <div className="font-mono-display text-[10px] tracking-[0.25em] uppercase text-primary mb-2">
+                {phase === "capturing" ? "ACQUIRING TARGET TELEMETRY..." :
+                 phase === "extracting" ? "ANALYZING INTENT SIGNATURE..." :
+                 "DISPATCHING PROBES..."}
+              </div>
+              <div className="font-mono-display text-[8px] tracking-[0.2em] uppercase text-muted-foreground/60">
+                {phase === "capturing" ? "SCANNING PAGE DOM + USER EVENTS" :
+                 phase === "extracting" ? "FEATHERLESS LLM PROCESSING INTENT" :
+                 "INITIALIZING TINYFISH AGENT SESSIONS"}
+              </div>
+            </div>
+          </div>
+        ) : activeTab === "exact" ? (
           <AgentGrid agents={exactAgents} />
         ) : (
           similarAgents.length > 0 ? (
@@ -287,14 +308,25 @@ function SidePanel() {
           )
         )}
       </div>
+      )}
 
-      {/* Best Deal */}
+      {/* Best Deal or No Results */}
       {phase === "complete" && (
         <BestDeal agents={agents} originalPrice={originalPrice} />
       )}
+      {phase === "complete" && agents.length > 0 && agents.every(a => a.status === "not_found" || a.status === "error") && (
+        <div className="mx-3 mt-3 p-3 border border-data/30 bg-data/5">
+          <div className="font-mono-display text-[10px] tracking-[0.2em] uppercase text-data text-center">
+            ◇ NO MATCHING TARGETS FOUND ACROSS {agents.length} PROBES
+          </div>
+          <div className="font-mono-display text-[9px] tracking-wider uppercase text-muted-foreground text-center mt-1">
+            TRY A DIFFERENT PRODUCT OR RE-DISPATCH
+          </div>
+        </div>
+      )}
 
-      {/* Idle state */}
-      {phase === "idle" && hasKeys && (
+      {/* Idle state — only when truly idle with no agents */}
+      {phase === "idle" && hasKeys && agents.length === 0 && !product && (
         <div className="flex-1 flex flex-col items-center justify-center p-8 gap-4">
           <div className="font-mono-display text-[11px] tracking-[0.25em] uppercase text-primary">
             ▸ AWAITING MISSION DIRECTIVE
@@ -305,8 +337,8 @@ function SidePanel() {
           </p>
           <div className="mt-2 font-mono-display text-[8px] tracking-[0.2em] uppercase text-muted-foreground/40 text-center leading-relaxed">
             COMPATIBLE TARGETS:<br />
-            AMAZON ▪ EBAY ▪ TARGET ▪ BEST BUY<br />
-            NEWEGG ▪ COSTCO ▪ NIKE ▪ ETSY
+            AMAZON ▪ EBAY ▪ TARGET ▪ NEWEGG<br />
+            COSTCO ▪ NIKE ▪ ETSY ▪ MORE
           </div>
         </div>
       )}

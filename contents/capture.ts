@@ -65,19 +65,37 @@ document.addEventListener("input", (e) => {
   }, 500)
 }, true)
 
-// Track dropdown/select changes (e.g., size, color pickers)
+// Track ALL form changes — selects, checkboxes, radios (filter interactions)
 document.addEventListener("change", (e) => {
-  const target = e.target as HTMLSelectElement
+  const target = e.target as HTMLInputElement | HTMLSelectElement
   if (!target) return
-  if (target.tagName !== "SELECT") return
 
-  const selectedText = target.options?.[target.selectedIndex]?.text || target.value
+  let value = ""
+  let label = ""
+
+  if (target.tagName === "SELECT") {
+    const sel = target as HTMLSelectElement
+    value = sel.options?.[sel.selectedIndex]?.text || sel.value
+    label = sel.name || sel.ariaLabel || ""
+  } else if (target.tagName === "INPUT") {
+    const inp = target as HTMLInputElement
+    if (inp.type === "checkbox" || inp.type === "radio") {
+      // Find the label for this checkbox/radio
+      const labelEl = inp.labels?.[0] || inp.closest("label") || inp.parentElement
+      label = labelEl?.textContent?.trim().slice(0, 80) || inp.name || ""
+      value = inp.checked ? label : `unchecked: ${label}`
+    } else {
+      return // text inputs handled by debounced input handler
+    }
+  } else {
+    return
+  }
 
   recentEvents.push({
     type: "select",
     selector: getSelector(target),
-    text: target.name || target.ariaLabel || "",
-    value: selectedText,
+    text: label,
+    value,
     timestamp: Date.now()
   })
 

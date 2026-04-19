@@ -12,8 +12,9 @@ interface AgentCardProps {
 
 export function AgentCard({ agent, index, isBestDeal }: AgentCardProps) {
   const probeId = `PROBE-${String(index + 1).padStart(2, "0")}`
-  const isDone = agent.status === "complete"
-  const isNotFound = agent.status === "not_found"
+  const hasUsableResult = agent.result && (agent.result.price || agent.result.product)
+  const isDone = agent.status === "complete" && hasUsableResult
+  const isNotFound = agent.status === "not_found" || (agent.status === "complete" && !hasUsableResult)
   const isError = agent.status === "error"
 
   // Track iframe loads — first load = live feed, second load = TinyFish completion page
@@ -84,7 +85,7 @@ export function AgentCard({ agent, index, isBestDeal }: AgentCardProps) {
         ) : null}
 
         {/* Session ended but no result yet — show processing state instead of TinyFish page */}
-        {iframeExpired && agent.status === "streaming" && (
+        {iframeExpired && agent.status === "streaming" && !isDone && !isNotFound && !isError && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
             <RadarSpinner />
             <span className="font-mono-display text-[9px] tracking-[0.2em] uppercase text-primary">
@@ -126,7 +127,10 @@ export function AgentCard({ agent, index, isBestDeal }: AgentCardProps) {
               NULL RESULT
             </div>
             <div className="font-mono-display text-[10px] tracking-wider text-muted-foreground uppercase mt-1">
-              RECALIBRATING — SCANNING VARIANTS
+              TARGET NOT FOUND ON {agent.site.toUpperCase()}
+            </div>
+            <div className="font-mono-display text-[9px] tracking-wider text-muted-foreground/50 uppercase mt-1">
+              CHECKING VARIANT CHANNEL
             </div>
           </div>
         )}

@@ -1,55 +1,56 @@
 import type { IntentResponse, PageCapture } from "./types"
 
 const ENDPOINT = "https://api.featherless.ai/v1/chat/completions"
-const MODEL = "meta-llama/Meta-Llama-3.1-8B-Instruct"
+// const MODEL = "meta-llama/Meta-Llama-3.1-8B-Instruct"
+const MODEL = "NousResearch/Hermes-2-Pro-Llama-3-8B"
 
 const DEFAULT_SITES = [
   { name: "Amazon", url: "https://www.amazon.com" },
   { name: "eBay", url: "https://www.ebay.com" },
   { name: "Target", url: "https://www.target.com" },
-  { name: "Best Buy", url: "https://www.bestbuy.com" }
+  { name: "Newegg", url: "https://www.newegg.com" }
 ]
 
-const SYSTEM_PROMPT = `You are an intent extraction engine for a shopping comparison tool.
+const SYSTEM_PROMPT = `You are an intent extraction engine. Your ONLY job is to analyze a shopping webpage and the user's interactions to understand what they want.
 
-Given a webpage's URL, title, HTML content, and user interaction events, extract:
-1. What product/item the user is looking at or searching for
-2. The product CATEGORY (e.g., "smart speakers", "running shoes", "laptops", "headphones")
-3. Key attributes the user cares about — infer from the product AND from user interactions:
-   - If user clicked a color filter → they care about color
-   - If user selected a size → they care about size
-   - If user sorted by price → they care about price range
-   - If user clicked a brand filter → they care about brand
-4. The current price on this site
+You will receive:
+- A webpage URL, title, and HTML snippet
+- Recent user DOM events (clicks, inputs, filter selections)
 
-IMPORTANT: Return ONLY valid JSON with this exact structure:
+Extract the user's shopping intent by analyzing BOTH the page content AND their interactions.
+
+RULES:
+- If the user clicked a color swatch or filter → extract that color as an attribute
+- If the user selected a size → extract that size
+- If the user typed in a search box → extract the search query
+- If the user clicked a price range filter → extract the price range
+- If the user clicked a brand filter → extract the brand preference
+- Look at the page title and HTML to identify the product name, category, and price
+
+Return ONLY this JSON structure, nothing else:
 {
   "intent": {
-    "type": "product_search" | "general_search" | "unknown",
-    "product": "product name",
-    "category": "product category (e.g., smart speakers, running shoes)",
-    "attributes": { "key": "value" },
+    "type": "product_search",
+    "product": "exact product name from the page",
+    "category": "product category (e.g. smart speakers, running shoes, electronics)",
+    "attributes": {
+      "brand": "brand name if identifiable",
+      "color": "color if user selected or product specifies",
+      "size": "size if user selected or product specifies",
+      "priceRange": "under $X or $X-$Y if identifiable",
+      "condition": "new/used/refurbished if specified"
+    },
     "currentPrice": "$XX.XX",
     "sourceSite": "domain.com"
   },
-  "agentGoals": [
-    {
-      "site": "site name",
-      "url": "https://site.com",
-      "goal": "Natural language instruction for the agent"
-    }
-  ]
+  "agentGoals": []
 }
 
-For attributes, include things like:
-- "color": "white"
-- "size": "10"
-- "brand": "Nike"
-- "priceRange": "under $50"
-- "condition": "new"
-- Any other relevant product attributes
-
-The agentGoals should tell a browser agent to find the EXACT same product. Be specific about what to search for and what to extract.`
+IMPORTANT:
+- Only include attributes you are confident about from the page or user events
+- Remove any attribute keys where the value would be empty or unknown
+- The agentGoals array should always be empty — goals are generated separately
+- Return ONLY the JSON, no explanation text before or after`
 
 /**
  * Call Featherless LLM to extract intent from page capture
@@ -176,11 +177,12 @@ export async function extractIntent(
     }
   }
 
-  // Validate structure
-  if (!parsed.intent || !parsed.agentGoals) {
-    console.error("[FlashyAI:Featherless] Invalid structure:", parsed)
+  // Validate structure — agentGoals is optional (always empty, goals built by orchestrator)
+  if (!parsed.intent) {
+    console.error("[FlashyAI:Featherless] Invalid structure — missing intent:", parsed)
     throw new Error("Invalid intent response structure")
   }
+  parsed.agentGoals = parsed.agentGoals || []
 
   console.log("[FlashyAI:Featherless] Intent extracted:", {
     product: parsed.intent.product,
