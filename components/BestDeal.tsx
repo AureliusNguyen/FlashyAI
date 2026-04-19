@@ -14,41 +14,57 @@ export function BestDeal({ agents, originalPrice }: BestDealProps) {
   const originalNum = originalPrice
     ? parseFloat(originalPrice.replace(/[^0-9.]/g, ""))
     : null
-  const savings = originalNum ? originalNum - best.price : null
+  const delta = originalNum ? originalNum - best.price : null
+  const pct = originalNum && delta ? Math.round((delta / originalNum) * 100) : null
 
   return (
-    <div className="mx-3 mb-3 p-4 rounded-lg bg-gradient-to-r from-green-900/40 to-emerald-900/40 border border-green-800/50">
-      <div className="flex items-center gap-2 mb-1">
-        <span className="text-xs text-green-400 uppercase tracking-wider">
-          Best Deal Found
+    <div className="mx-3 mt-3 border border-primary/50 bg-gradient-panel shadow-readout">
+      {/* Header strip */}
+      <div className="flex items-center justify-between px-3 py-1.5 border-b border-primary/30 bg-primary/5">
+        <span className="font-mono-display text-[10px] tracking-[0.25em] uppercase text-primary">
+          ▸ PRIMARY TARGET ACQUIRED
         </span>
         {best.matchType === "similar" && (
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/20 text-violet-400">
-            similar product
+          <span className="font-mono-display text-[9px] tracking-[0.2em] px-1 border border-data/40 text-data uppercase">
+            VARIANT
           </span>
         )}
       </div>
-      <div className="flex items-baseline gap-2">
-        <span className="text-2xl font-bold text-green-300">
-          ${best.price.toFixed(2)}
-        </span>
-        <span className="text-sm text-zinc-400">on {best.site}</span>
-      </div>
-      {savings && savings > 0 && (
-        <div className="text-sm text-green-400 mt-1">
-          Save ${savings.toFixed(2)} vs current page
+
+      <div className="px-3 py-3">
+        {/* Price readout */}
+        <div className="flex items-baseline justify-between">
+          <div
+            className="font-readout text-3xl font-bold text-primary"
+            style={{ textShadow: "0 0 16px hsl(var(--primary) / 0.6)" }}
+          >
+            ${best.price.toFixed(2)}
+          </div>
+          <div className="font-mono-display text-[10px] tracking-[0.2em] uppercase text-muted-foreground">
+            via <span className="text-foreground">{best.site}</span>
+          </div>
         </div>
-      )}
-      {best.result.url && (
-        <a
-          href={best.result.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-block mt-2 px-3 py-1.5 text-xs font-medium bg-green-600 hover:bg-green-500 text-white rounded-md transition-colors"
-        >
-          Go to {best.site}
-        </a>
-      )}
+
+        {/* Delta */}
+        {delta !== null && delta > 0 && (
+          <div className="mt-2 flex items-center gap-2 font-mono-display text-[10px] tracking-widest uppercase">
+            <span className="text-phosphor">DELTA -${delta.toFixed(2)}</span>
+            {pct !== null && <span className="text-phosphor/70">({pct}% SAVED)</span>}
+          </div>
+        )}
+
+        {/* CTA */}
+        {best.result.url && (
+          <a
+            href={best.result.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-3 block w-full text-center py-2 border border-primary bg-primary/10 hover:bg-primary/20 font-mono-display text-[11px] tracking-[0.25em] uppercase text-primary transition-colors"
+          >
+            ▸ ENGAGE TARGET ↗
+          </a>
+        )}
+      </div>
     </div>
   )
 }

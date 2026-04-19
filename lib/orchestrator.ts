@@ -12,7 +12,6 @@ export interface OrchestratorCallbacks {
 
 const TARGET_SITES = [
   { name: "Amazon", url: "https://www.amazon.com" },
-  { name: "Walmart", url: "https://www.walmart.com" },
   { name: "eBay", url: "https://www.ebay.com" },
   { name: "Target", url: "https://www.target.com" }
 ]
@@ -237,8 +236,8 @@ async function runExactAndCascade(
       if (agent) {
         if (update.status) agent.status = update.status as AgentState["status"]
         if (update.streamingUrl) agent.streamingUrl = update.streamingUrl
-        if (update.result) agent.result = update.result
-        if (update.error) agent.error = update.error
+        if (update.result) { agent.result = update.result; agent.streamingUrl = undefined }
+        if (update.error) { agent.error = update.error; agent.streamingUrl = undefined }
         callbacks.onAgentUpdate([...agents])
       }
     }

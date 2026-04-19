@@ -29,53 +29,58 @@ function Popup() {
   }
 
   return (
-    <div className="w-80 p-4 bg-[#0a0a0f]">
-      <div className="text-lg font-bold bg-gradient-to-r from-violet-400 to-cyan-400 bg-clip-text text-transparent mb-4">
-        FlashyAI Settings
+    <div className="w-80 p-4 bg-background">
+      {/* Header */}
+      <div className="font-mono-display text-[11px] tracking-[0.25em] uppercase text-primary mb-4">
+        FLASHYAI ▪ CONFIGURATION
       </div>
 
       <div className="space-y-3">
         <div>
-          <label className="block text-xs text-zinc-400 mb-1">TinyFish API Key</label>
+          <label className="block font-mono-display text-[9px] tracking-[0.2em] uppercase text-muted-foreground mb-1">
+            TINYFISH API KEY
+          </label>
           <input
             type="password"
             value={tinyfishKey}
             onChange={(e) => setTinyfishKey(e.target.value)}
-            placeholder="sk-mino-..."
-            className="w-full px-3 py-2 rounded-md bg-zinc-900 border border-zinc-700 text-sm text-zinc-200 placeholder:text-zinc-600 focus:border-violet-500 focus:outline-none"
+            placeholder="sk-tinyfish-..."
+            className="w-full px-3 py-2 bg-surface border border-border text-sm text-foreground placeholder:text-muted-foreground/40 focus:border-primary focus:outline-none font-mono-display text-xs"
           />
         </div>
 
         <div>
-          <label className="block text-xs text-zinc-400 mb-1">Featherless API Key</label>
+          <label className="block font-mono-display text-[9px] tracking-[0.2em] uppercase text-muted-foreground mb-1">
+            FEATHERLESS API KEY
+          </label>
           <input
             type="password"
             value={featherlessKey}
             onChange={(e) => setFeatherlessKey(e.target.value)}
-            placeholder="fl-..."
-            className="w-full px-3 py-2 rounded-md bg-zinc-900 border border-zinc-700 text-sm text-zinc-200 placeholder:text-zinc-600 focus:border-violet-500 focus:outline-none"
+            placeholder="rc_..."
+            className="w-full px-3 py-2 bg-surface border border-border text-sm text-foreground placeholder:text-muted-foreground/40 focus:border-primary focus:outline-none font-mono-display text-xs"
           />
         </div>
 
         <button
           onClick={handleSave}
-          className="w-full py-2 px-4 rounded-md bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium transition-colors"
+          className="w-full py-2 px-4 border border-primary bg-primary/10 hover:bg-primary/20 font-mono-display text-[10px] tracking-[0.25em] uppercase text-primary transition-colors"
         >
-          {saved ? "Saved!" : "Save Keys"}
+          {saved ? "▸ SAVED" : "▸ SAVE CONFIGURATION"}
         </button>
 
-        <hr className="border-zinc-800" />
-
-        <button
-          onClick={openSidePanel}
-          className="w-full py-2 px-4 rounded-md bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-sm font-medium transition-colors"
-        >
-          Open Side Panel
-        </button>
+        <div className="border-t border-border pt-3">
+          <button
+            onClick={openSidePanel}
+            className="w-full py-2 px-4 border border-border bg-surface hover:bg-surface-raised font-mono-display text-[10px] tracking-[0.25em] uppercase text-foreground transition-colors"
+          >
+            ▸ OPEN MISSION CONTROL
+          </button>
+        </div>
       </div>
 
-      <div className="mt-4 text-xs text-zinc-600 text-center">
-        Keys are stored locally in your browser.
+      <div className="mt-4 font-mono-display text-[8px] tracking-[0.2em] uppercase text-muted-foreground/40 text-center">
+        CREDENTIALS STORED LOCALLY
       </div>
     </div>
   )

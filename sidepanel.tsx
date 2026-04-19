@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react"
 import { AgentGrid } from "./components/AgentGrid"
 import { BestDeal } from "./components/BestDeal"
+import { RadarSpinner } from "./components/RadarSpinner"
 import type { AgentState } from "./lib/types"
 import "./style.css"
 
@@ -17,28 +18,25 @@ function SidePanel() {
   const [activeTab, setActiveTab] = useState<Tab>("exact")
   const [hasSimilarSearch, setHasSimilarSearch] = useState(false)
 
-  // Filter agents by tab
   const exactAgents = useMemo(() => agents.filter(a => a.matchType === "exact"), [agents])
   const similarAgents = useMemo(() => agents.filter(a => a.matchType === "similar"), [agents])
-
   const exactFoundCount = useMemo(() => exactAgents.filter(a => a.status === "complete").length, [exactAgents])
   const similarFoundCount = useMemo(() => similarAgents.filter(a => a.status === "complete").length, [similarAgents])
+  const totalAgents = agents.length
+  const completedAgents = agents.filter(a => ["complete", "not_found", "error"].includes(a.status)).length
 
-  // Auto-switch to similar tab when similar search starts
   useEffect(() => {
     if (hasSimilarSearch && exactFoundCount === 0 && similarAgents.length > 0) {
       setActiveTab("similar")
     }
   }, [hasSimilarSearch, exactFoundCount, similarAgents.length])
 
-  // Check for API keys on mount
   useEffect(() => {
     chrome.storage.local.get(["tinyfishKey", "featherlessKey"], (result) => {
       setHasKeys(!!result.tinyfishKey && !!result.featherlessKey)
     })
   }, [])
 
-  // Listen for messages from service worker
   useEffect(() => {
     const handler = (message: { type: string; payload?: unknown }) => {
       switch (message.type) {
@@ -49,34 +47,28 @@ function SidePanel() {
           setActiveTab("exact")
           setHasSimilarSearch(false)
           break
-
         case "INTENT_EXTRACTED": {
           const p = message.payload as { type: string; product: string }
           setProduct(p.product)
           setPhase("running")
           break
         }
-
         case "AGENT_UPDATE":
           setAgents(message.payload as AgentState[])
           break
-
         case "SIMILAR_SEARCH_START":
           setHasSimilarSearch(true)
           break
-
         case "ORCHESTRATION_COMPLETE":
           setAgents(message.payload as AgentState[])
           setPhase("complete")
           break
-
         case "ERROR":
           setError(String(message.payload))
           setPhase("error")
           break
       }
     }
-
     chrome.runtime.onMessage.addListener(handler)
     return () => chrome.runtime.onMessage.removeListener(handler)
   }, [])
@@ -84,38 +76,28 @@ function SidePanel() {
   const handleFlashIt = useCallback(async () => {
     setPhase("capturing")
     setError("")
-    console.log("[FlashyAI:SidePanel] Flash It! clicked")
+    console.log("[FlashyAI:SidePanel] Dispatch probes clicked")
 
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
-      console.log("[FlashyAI:SidePanel] Active tab:", tab?.id, tab?.url)
-
-      if (!tab?.id) {
-        setError("No active tab found")
-        setPhase("error")
-        return
-      }
+      if (!tab?.id) { setError("NO ACTIVE TAB DETECTED"); setPhase("error"); return }
 
       const url = tab.url || ""
       if (url.startsWith("chrome://") || url.startsWith("chrome-extension://") || url.startsWith("about:") || url === "") {
-        setError("Cannot capture Chrome internal pages. Navigate to a product page first (e.g. Amazon, Best Buy, etc.).")
+        setError("INVALID TARGET — NAVIGATE TO A PRODUCT PAGE FIRST")
         setPhase("error")
         return
       }
 
       const hostname = new URL(url).hostname.replace("www.", "")
       const SUPPORTED_SITES = [
-        "amazon.com", "walmart.com", "ebay.com", "target.com",
+        "amazon.com", "ebay.com", "target.com",
         "bestbuy.com", "newegg.com", "costco.com", "homedepot.com",
         "etsy.com", "aliexpress.com", "zappos.com", "nordstrom.com",
         "macys.com", "nike.com", "adidas.com"
       ]
-      const isProductSite = SUPPORTED_SITES.some(s => hostname.includes(s))
-
-      if (!isProductSite) {
-        setError(
-          `"${hostname}" isn't a recognized shopping site.\n\nTry visiting a product page on Amazon, Walmart, eBay, Target, Best Buy, or other major retailers, then click Flash It!`
-        )
+      if (!SUPPORTED_SITES.some(s => hostname.includes(s))) {
+        setError(`TARGET "${hostname.toUpperCase()}" NOT IN DATABASE.\n\nCOMPATIBLE: AMAZON, EBAY, TARGET, BEST BUY, NEWEGG, COSTCO`)
         setPhase("error")
         return
       }
@@ -124,7 +106,6 @@ function SidePanel() {
       try {
         capture = await chrome.tabs.sendMessage(tab.id, { type: "REQUEST_CAPTURE" })
       } catch {
-        console.log("[FlashyAI:SidePanel] Content script not found, falling back...")
         const results = await chrome.scripting.executeScript({
           target: { tabId: tab.id },
           func: () => {
@@ -148,29 +129,20 @@ function SidePanel() {
       }
 
       if (!capture) {
-        setError("Could not capture page. Try refreshing the page and clicking Flash It! again.")
+        setError("CAPTURE FAILED — REFRESH PAGE AND RETRY")
         setPhase("error")
         return
       }
 
-      console.log("[FlashyAI:SidePanel] Captured page:", {
-        url: capture.url,
-        title: capture.title,
-        htmlLength: capture.html?.length,
-        events: capture.events?.length
-      })
-
       if (capture.html) {
         const priceMatch = capture.html.match(/\$[\d,]+\.?\d*/)?.[0]
-        if (priceMatch) {
-          setOriginalPrice(priceMatch)
-        }
+        if (priceMatch) setOriginalPrice(priceMatch)
       }
 
       chrome.runtime.sendMessage({ type: "FLASH_IT", payload: capture })
     } catch (err) {
       console.error("[FlashyAI:SidePanel] Capture error:", err)
-      setError(`Capture failed: ${err}`)
+      setError(`SYSTEM ERROR: ${err}`)
       setPhase("error")
     }
   }, [])
@@ -178,50 +150,65 @@ function SidePanel() {
   const isWorking = phase === "capturing" || phase === "extracting" || phase === "running"
   const showTabs = agents.length > 0
 
-  return (
-    <div className="min-h-screen bg-[#0a0a0f] flex flex-col">
-      {/* Header */}
-      <div className="p-4 border-b border-zinc-800">
-        <div className="flex items-center gap-2 mb-3">
-          <div className="text-xl font-bold bg-gradient-to-r from-violet-400 to-cyan-400 bg-clip-text text-transparent">
-            FlashyAI
-          </div>
-          <div className="text-xs text-zinc-500">v0.1</div>
-        </div>
+  const missionStatus = phase === "idle" ? "STANDBY" :
+    phase === "capturing" ? "SCANNING" :
+    phase === "extracting" ? "ANALYZING" :
+    phase === "running" ? "ACTIVE" :
+    phase === "complete" ? "COMPLETE" :
+    "ERROR"
 
+  return (
+    <div className="min-h-screen bg-background scanlines grid-paper flex flex-col">
+      {/* Top status bar */}
+      <div className="flex items-center justify-between px-3 py-1.5 bg-surface border-b border-border">
+        <span className="font-mono-display text-[9px] tracking-[0.25em] uppercase text-primary">
+          FLASHYAI MISSION CONTROL
+        </span>
+        <span className="font-mono-display text-[9px] tracking-[0.2em] uppercase text-muted-foreground">
+          MISSION: <span className={phase === "running" ? "text-phosphor" : phase === "error" ? "text-danger" : phase === "complete" ? "text-phosphor" : "text-primary"}>{missionStatus}</span>
+          {totalAgents > 0 && <> ▪ PROBES: {completedAgents}/{totalAgents}</>}
+        </span>
+      </div>
+
+      {/* Main header + button */}
+      <div className="p-3 border-b border-border">
         {!hasKeys ? (
-          <div className="p-3 rounded-lg bg-yellow-900/20 border border-yellow-800/50 text-sm text-yellow-300">
-            <p className="font-medium mb-1">API keys needed</p>
-            <p className="text-xs text-yellow-400/70">
-              Right-click the extension icon &rarr; Options to configure your TinyFish and Featherless API keys.
+          <div className="p-3 border border-warning/30 bg-warning/5">
+            <p className="font-mono-display text-[10px] tracking-[0.2em] uppercase text-warning mb-1">
+              ▸ CONFIGURATION REQUIRED
+            </p>
+            <p className="font-mono-display text-[9px] tracking-wider uppercase text-muted-foreground">
+              RIGHT-CLICK EXTENSION ICON → OPTIONS → ENTER API CREDENTIALS
             </p>
           </div>
         ) : (
           <button
             onClick={handleFlashIt}
             disabled={isWorking}
-            className={`w-full py-3 px-4 rounded-lg font-semibold text-sm transition-all ${
+            className={`w-full py-2.5 px-4 font-mono-display text-[11px] tracking-[0.25em] uppercase transition-all border ${
               isWorking
-                ? "bg-zinc-800 text-zinc-500 cursor-not-allowed"
-                : "bg-gradient-to-r from-violet-600 to-cyan-600 hover:from-violet-500 hover:to-cyan-500 text-white shadow-lg shadow-violet-500/20"
+                ? "bg-surface text-muted-foreground border-border cursor-not-allowed"
+                : "bg-primary/10 text-primary border-primary hover:bg-primary/20"
             }`}
           >
-            {phase === "capturing" ? "Capturing page..." :
-             phase === "extracting" ? "Understanding intent..." :
-             phase === "running" ? "Agents working..." :
-             "Flash It!"}
+            {phase === "capturing" ? "SCANNING TARGET..." :
+             phase === "extracting" ? "ANALYZING TELEMETRY..." :
+             phase === "running" ? "PROBES ACTIVE..." :
+             "▸ DISPATCH PROBES"}
           </button>
         )}
       </div>
 
-      {/* Status */}
+      {/* Mission target */}
       {product && (
-        <div className="px-4 py-2 border-b border-zinc-800 bg-zinc-900/50">
-          <div className="text-xs text-zinc-500">Looking for</div>
-          <div className="text-sm text-zinc-200 font-medium">{product}</div>
+        <div className="px-3 py-2 border-b border-border bg-surface/50">
+          <div className="font-mono-display text-[9px] tracking-[0.25em] uppercase text-primary mb-0.5">
+            ▸ MISSION TARGET
+          </div>
+          <div className="font-sans text-sm text-foreground font-medium">{product}</div>
           {originalPrice && (
-            <div className="text-xs text-zinc-400 mt-0.5">
-              Current price: {originalPrice}
+            <div className="font-mono-display text-[10px] tracking-wider uppercase text-muted-foreground mt-0.5">
+              SOURCE PRICE: <span className="font-readout text-foreground">{originalPrice}</span>
             </div>
           )}
         </div>
@@ -229,57 +216,55 @@ function SidePanel() {
 
       {/* Error */}
       {error && (
-        <div className="mx-3 mt-3 p-3 rounded-lg bg-red-900/20 border border-red-800/50 text-sm text-red-300">
-          {error}
+        <div className="mx-3 mt-3 p-3 border border-danger/30 bg-danger/5">
+          <div className="font-mono-display text-[10px] tracking-[0.2em] uppercase text-danger whitespace-pre-line">
+            ◢ {error}
+          </div>
         </div>
       )}
 
       {/* Tabs */}
       {showTabs && (
-        <div className="flex border-b border-zinc-800">
+        <div className="flex border-b border-border">
           <button
             onClick={() => setActiveTab("exact")}
-            className={`flex-1 py-2.5 text-xs font-medium transition-colors relative ${
-              activeTab === "exact"
-                ? "text-zinc-100"
-                : "text-zinc-500 hover:text-zinc-300"
+            className={`flex-1 py-2 font-mono-display text-[10px] tracking-[0.2em] uppercase transition-colors relative ${
+              activeTab === "exact" ? "text-primary" : "text-muted-foreground hover:text-foreground"
             }`}
           >
-            Exact Match
+            ▸ EXACT
             {exactFoundCount > 0 && (
-              <span className="ml-1.5 px-1.5 py-0.5 rounded-full bg-green-500/20 text-green-400 text-[10px]">
+              <span className="ml-1.5 px-1 border border-phosphor/40 text-phosphor text-[9px]">
                 {exactFoundCount}
               </span>
             )}
             {activeTab === "exact" && (
-              <div className="absolute bottom-0 left-2 right-2 h-0.5 bg-gradient-to-r from-violet-500 to-cyan-500 rounded-full" />
+              <div className="absolute bottom-0 left-2 right-2 h-[2px] bg-primary" />
             )}
           </button>
           <button
             onClick={() => setActiveTab("similar")}
-            className={`flex-1 py-2.5 text-xs font-medium transition-colors relative ${
-              activeTab === "similar"
-                ? "text-zinc-100"
-                : "text-zinc-500 hover:text-zinc-300"
+            className={`flex-1 py-2 font-mono-display text-[10px] tracking-[0.2em] uppercase transition-colors relative ${
+              activeTab === "similar" ? "text-primary" : "text-muted-foreground hover:text-foreground"
             }`}
           >
-            Similar
+            ▸ VARIANTS
             {similarFoundCount > 0 && (
-              <span className="ml-1.5 px-1.5 py-0.5 rounded-full bg-violet-500/20 text-violet-400 text-[10px]">
+              <span className="ml-1.5 px-1 border border-data/40 text-data text-[9px]">
                 {similarFoundCount}
               </span>
             )}
             {!hasSimilarSearch && similarAgents.length === 0 && (
-              <span className="ml-1.5 text-zinc-600 text-[10px]">--</span>
+              <span className="ml-1.5 text-muted-foreground/40 text-[9px]">--</span>
             )}
             {activeTab === "similar" && (
-              <div className="absolute bottom-0 left-2 right-2 h-0.5 bg-gradient-to-r from-violet-500 to-cyan-500 rounded-full" />
+              <div className="absolute bottom-0 left-2 right-2 h-[2px] bg-primary" />
             )}
           </button>
         </div>
       )}
 
-      {/* Agent Grid (filtered by tab) */}
+      {/* Agent Grid */}
       <div className="flex-1 overflow-y-auto">
         {activeTab === "exact" ? (
           <AgentGrid agents={exactAgents} />
@@ -287,43 +272,51 @@ function SidePanel() {
           similarAgents.length > 0 ? (
             <AgentGrid agents={similarAgents} />
           ) : hasSimilarSearch ? (
-            <div className="flex items-center justify-center p-8">
-              <div className="flex flex-col items-center gap-2">
-                <div className="w-6 h-6 border-2 border-zinc-600 border-t-violet-400 rounded-full animate-spin" />
-                <span className="text-xs text-zinc-500">Searching for alternatives...</span>
-              </div>
+            <div className="flex flex-col items-center justify-center p-8 gap-3">
+              <RadarSpinner />
+              <span className="font-mono-display text-[9px] tracking-[0.2em] uppercase text-muted-foreground">
+                SCANNING FOR VARIANTS...
+              </span>
             </div>
           ) : (
             <div className="flex items-center justify-center p-8">
-              <p className="text-xs text-zinc-600 text-center">
-                Similar products will appear here if exact matches aren't found.
+              <p className="font-mono-display text-[9px] tracking-[0.2em] uppercase text-muted-foreground/40 text-center">
+                VARIANT RESULTS WILL APPEAR IF EXACT MATCHES ARE NOT FOUND
               </p>
             </div>
           )
         )}
       </div>
 
-      {/* Best Deal Banner */}
+      {/* Best Deal */}
       {phase === "complete" && (
         <BestDeal agents={agents} originalPrice={originalPrice} />
       )}
 
       {/* Idle state */}
       {phase === "idle" && hasKeys && (
-        <div className="flex-1 flex items-center justify-center p-8">
-          <div className="text-center">
-            <div className="text-4xl mb-3">⚡</div>
-            <p className="text-sm text-zinc-400 mb-3">
-              Navigate to a product page on a supported site, then click <span className="text-violet-400 font-medium">Flash It!</span> to
-              compare prices across the web.
-            </p>
-            <div className="text-xs text-zinc-600 space-y-1">
-              <p className="text-zinc-500 font-medium">Supported sites:</p>
-              <p>Amazon, Walmart, eBay, Target, Best Buy, Newegg, Costco, Etsy, Nike, Adidas & more</p>
-            </div>
+        <div className="flex-1 flex flex-col items-center justify-center p-8 gap-4">
+          <div className="font-mono-display text-[11px] tracking-[0.25em] uppercase text-primary">
+            ▸ AWAITING MISSION DIRECTIVE
+          </div>
+          <p className="font-mono-display text-[9px] tracking-wider uppercase text-muted-foreground text-center leading-relaxed">
+            NAVIGATE TO A TARGET SITE AND CLICK<br />
+            <span className="text-primary">DISPATCH PROBES</span> TO BEGIN
+          </p>
+          <div className="mt-2 font-mono-display text-[8px] tracking-[0.2em] uppercase text-muted-foreground/40 text-center leading-relaxed">
+            COMPATIBLE TARGETS:<br />
+            AMAZON ▪ EBAY ▪ TARGET ▪ BEST BUY<br />
+            BEST BUY ▪ NEWEGG ▪ COSTCO ▪ ETSY
           </div>
         </div>
       )}
+
+      {/* Footer chrome */}
+      <div className="px-3 py-1.5 border-t border-border bg-surface">
+        <span className="font-mono-display text-[8px] tracking-[0.3em] uppercase text-muted-foreground/40">
+          FLASHYAI v1.0 ▪ MISSION CONTROL ▪ FLIGHT OPS
+        </span>
+      </div>
     </div>
   )
 }

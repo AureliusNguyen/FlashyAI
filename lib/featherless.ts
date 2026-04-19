@@ -5,7 +5,6 @@ const MODEL = "meta-llama/Meta-Llama-3.1-8B-Instruct"
 
 const DEFAULT_SITES = [
   { name: "Amazon", url: "https://www.amazon.com" },
-  { name: "Walmart", url: "https://www.walmart.com" },
   { name: "eBay", url: "https://www.ebay.com" },
   { name: "Target", url: "https://www.target.com" }
 ]
@@ -125,15 +124,55 @@ export async function extractIntent(
     throw new Error("No content in Featherless response")
   }
 
-  // Parse JSON from response — handle potential markdown wrapping
-  const jsonStr = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim()
+  // Extract JSON from LLM response — handles:
+  // 1. Pure JSON
+  // 2. ```json ... ``` wrapped
+  // 3. Prose before/after JSON (find the outermost { ... })
+  // 4. Truncated JSON (attempt repair)
+  let jsonStr = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim()
 
   let parsed: IntentResponse
   try {
     parsed = JSON.parse(jsonStr) as IntentResponse
-  } catch (parseErr) {
-    console.error("[FlashyAI:Featherless] Failed to parse JSON:", jsonStr.slice(0, 500), parseErr)
-    throw new Error(`Failed to parse LLM response as JSON: ${parseErr}`)
+  } catch {
+    // Try extracting JSON object from surrounding text
+    console.log("[FlashyAI:Featherless] Direct parse failed, extracting JSON from text...")
+    const firstBrace = jsonStr.indexOf("{")
+    const lastBrace = jsonStr.lastIndexOf("}")
+
+    if (firstBrace === -1) {
+      console.error("[FlashyAI:Featherless] No JSON object found in response:", jsonStr.slice(0, 300))
+      throw new Error("No JSON found in LLM response")
+    }
+
+    let extracted = jsonStr.slice(firstBrace, lastBrace + 1)
+
+    try {
+      parsed = JSON.parse(extracted) as IntentResponse
+      console.log("[FlashyAI:Featherless] Successfully extracted JSON from surrounding text")
+    } catch {
+      // JSON might be truncated — try to repair by closing open brackets
+      console.log("[FlashyAI:Featherless] Extracted JSON still invalid, attempting repair...")
+      const openBraces = (extracted.match(/{/g) || []).length
+      const closeBraces = (extracted.match(/}/g) || []).length
+      const openBrackets = (extracted.match(/\[/g) || []).length
+      const closeBrackets = (extracted.match(/\]/g) || []).length
+
+      // Close any unclosed strings, arrays, objects
+      let repaired = extracted
+      if (repaired.match(/,\s*$/)) repaired = repaired.replace(/,\s*$/, "")
+      if (repaired.match(/"[^"]*$/)) repaired += '"'
+      for (let i = 0; i < openBrackets - closeBrackets; i++) repaired += "]"
+      for (let i = 0; i < openBraces - closeBraces; i++) repaired += "}"
+
+      try {
+        parsed = JSON.parse(repaired) as IntentResponse
+        console.log("[FlashyAI:Featherless] Repaired truncated JSON successfully")
+      } catch (finalErr) {
+        console.error("[FlashyAI:Featherless] Failed to parse JSON even after repair:", extracted.slice(0, 500), finalErr)
+        throw new Error(`Failed to parse LLM response as JSON: ${finalErr}`)
+      }
+    }
   }
 
   // Validate structure

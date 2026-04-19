@@ -1,60 +1,55 @@
 import React from "react"
 import type { AgentState } from "../lib/types"
+import { StatusLamp } from "./StatusLamp"
+import { StatusBracket } from "./StatusBracket"
+import { RadarSpinner } from "./RadarSpinner"
 
 interface AgentCardProps {
   agent: AgentState
+  index: number
+  isBestDeal?: boolean
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  queued: "bg-zinc-700",
-  connecting: "bg-yellow-500/20 text-yellow-400",
-  streaming: "bg-blue-500/20 text-blue-400",
-  complete: "bg-green-500/20 text-green-400",
-  not_found: "bg-orange-500/20 text-orange-400",
-  error: "bg-red-500/20 text-red-400"
-}
-
-const STATUS_LABELS: Record<string, string> = {
-  queued: "Queued",
-  connecting: "Connecting...",
-  streaming: "Live",
-  complete: "Found",
-  not_found: "Not Available",
-  error: "Failed"
-}
-
-export function AgentCard({ agent }: AgentCardProps) {
+export function AgentCard({ agent, index, isBestDeal }: AgentCardProps) {
+  const probeId = `PROBE-${String(index + 1).padStart(2, "0")}`
   const isLive = agent.status === "streaming" && agent.streamingUrl
   const isDone = agent.status === "complete"
   const isNotFound = agent.status === "not_found"
   const isError = agent.status === "error"
 
   return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
-        <div className="flex items-center gap-2">
-          <div className={`w-2 h-2 rounded-full ${
-            isLive ? "bg-blue-400 animate-pulse" :
-            isDone ? "bg-green-400" :
-            isNotFound ? "bg-orange-400" :
-            isError ? "bg-red-400" :
-            "bg-zinc-600"
-          }`} />
-          <span className="text-sm font-medium text-zinc-200">{agent.site}</span>
+    <div className="bg-gradient-panel border border-border-strong shadow-bezel animate-boot-in">
+      {/* Top label strip */}
+      <div className="flex items-center justify-between px-2.5 py-1.5 bg-background/60 border-b border-border">
+        <div className="flex items-center gap-2 min-w-0">
+          <StatusLamp status={agent.status} />
+          <span className="font-mono-display text-[10px] tracking-[0.18em] uppercase text-muted-foreground">
+            {probeId}
+          </span>
+          <span className="font-mono-display text-[10px] tracking-[0.15em] uppercase text-foreground/80 truncate">
+            ▪ {agent.site}
+          </span>
           {agent.matchType === "similar" && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/20 text-violet-400">
-              similar
+            <span className="font-mono-display text-[9px] tracking-[0.18em] px-1 border border-data/40 text-data uppercase">
+              VARIANT
             </span>
           )}
         </div>
-        <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_COLORS[agent.status] || ""}`}>
-          {STATUS_LABELS[agent.status] || agent.status}
-        </span>
+        <div className="flex items-center gap-1.5">
+          {isBestDeal && isDone && (
+            <span className="font-mono-display text-[8px] tracking-[0.2em] px-1 py-0.5 bg-primary/15 border border-primary/50 text-primary uppercase">
+              TARGET LOCKED
+            </span>
+          )}
+          <StatusBracket status={agent.status} />
+        </div>
       </div>
 
-      {/* Content */}
-      <div className="relative" style={{ paddingBottom: "56.25%" }}>
+      {/* Viewport */}
+      <div className="viewport-frame relative bg-background" style={{ paddingBottom: "56.25%" }}>
+        <span className="corner-tr" />
+        <span className="corner-bl" />
+
         {isLive && agent.streamingUrl ? (
           <iframe
             src={agent.streamingUrl}
@@ -62,42 +57,79 @@ export function AgentCard({ agent }: AgentCardProps) {
             sandbox="allow-scripts allow-same-origin"
             allow="autoplay"
           />
-        ) : isDone && agent.result ? (
-          <div className="absolute inset-0 flex flex-col items-center justify-center p-4 text-center">
-            <p className="text-lg font-bold text-green-400">
+        ) : isLive ? (
+          <div className="absolute inset-0 overflow-hidden">
+            <div className="absolute inset-0 grid-paper opacity-40" />
+            <div className="absolute inset-x-0 h-8 bg-gradient-to-b from-phosphor/20 to-transparent animate-scanline-sweep pointer-events-none" />
+            <div className="absolute top-2 left-2 font-mono-display text-[9px] tracking-widest text-phosphor uppercase">
+              ◉ REC ▪ T+00:0{index + 3}
+            </div>
+            <div className="absolute bottom-2 left-2 right-2 font-mono-display text-[9px] tracking-wider text-phosphor/80 uppercase truncate">
+              &gt; navigating...
+              <span className="animate-blink-cursor">▌</span>
+            </div>
+          </div>
+        ) : null}
+
+        {isDone && agent.result && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center px-3 text-center">
+            <div className="font-mono-display text-[9px] tracking-[0.2em] text-muted-foreground uppercase mb-1">
+              ▸ ACQUIRED
+            </div>
+            <div
+              className="font-readout text-2xl font-bold text-primary"
+              style={{ textShadow: "0 0 12px hsl(var(--primary) / 0.6)" }}
+            >
               {agent.result.price || "N/A"}
-            </p>
-            <p className="text-xs text-zinc-400 mt-1 line-clamp-2">
-              {agent.result.product || "Product found"}
-            </p>
+            </div>
+            <div className="font-sans text-[11px] text-foreground/70 mt-1 line-clamp-2">
+              {agent.result.product || "TARGET ACQUIRED"}
+            </div>
             {agent.result.url && (
               <a
                 href={agent.result.url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="mt-2 text-xs text-blue-400 hover:underline"
+                className="mt-2 font-mono-display text-[10px] tracking-widest uppercase text-data hover:text-primary transition-colors"
               >
-                View on {agent.site}
+                &gt; VIEW SOURCE ↗
               </a>
             )}
           </div>
-        ) : isNotFound ? (
-          <div className="absolute inset-0 flex flex-col items-center justify-center p-4">
-            <p className="text-sm text-orange-400 font-medium">Not available</p>
-            <p className="text-xs text-zinc-500 mt-1">Searching for similar products...</p>
-          </div>
-        ) : isError ? (
-          <div className="absolute inset-0 flex items-center justify-center p-4">
-            <p className="text-xs text-red-400 text-center">{agent.error || "Agent failed"}</p>
-          </div>
-        ) : (
-          <div className="absolute inset-0 flex items-center justify-center">
-            <div className="flex flex-col items-center gap-2">
-              <div className="w-6 h-6 border-2 border-zinc-600 border-t-zinc-300 rounded-full animate-spin" />
-              <span className="text-xs text-zinc-500">
-                {agent.status === "connecting" ? "Connecting..." : "Waiting..."}
-              </span>
+        )}
+
+        {isNotFound && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center px-3 text-center">
+            <div className="font-mono-display text-xs tracking-[0.2em] text-data uppercase">
+              NULL RESULT
             </div>
+            <div className="font-mono-display text-[10px] tracking-wider text-muted-foreground uppercase mt-1">
+              RECALIBRATING — SCANNING VARIANTS
+            </div>
+          </div>
+        )}
+
+        {isError && (
+          <div className="absolute inset-0 flex items-center justify-center px-3">
+            <div className="font-mono-display text-[10px] tracking-widest text-danger uppercase text-center">
+              ◢ ABORT ◣<br />
+              <span className="text-[9px] text-danger/70">{agent.error || "PROBE FAILURE"}</span>
+            </div>
+          </div>
+        )}
+
+        {(agent.status === "queued" || agent.status === "connecting") && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
+            {agent.status === "connecting" ? (
+              <RadarSpinner />
+            ) : (
+              <div className="font-mono-display text-[10px] tracking-widest text-muted-foreground/60 uppercase">
+                ▣ ▣ ▣ ▣ ▣
+              </div>
+            )}
+            <span className="font-mono-display text-[9px] tracking-[0.2em] uppercase text-muted-foreground">
+              {agent.status === "connecting" ? "ESTABLISHING UPLINK..." : "STANDBY"}
+            </span>
           </div>
         )}
       </div>
