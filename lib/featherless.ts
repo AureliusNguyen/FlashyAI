@@ -162,10 +162,19 @@ export async function extractIntent(
 
       // Close any unclosed strings, arrays, objects
       let repaired = extracted
-      if (repaired.match(/,\s*$/)) repaired = repaired.replace(/,\s*$/, "")
-      if (repaired.match(/"[^"]*$/)) repaired += '"'
-      for (let i = 0; i < openBrackets - closeBrackets; i++) repaired += "]"
-      for (let i = 0; i < openBraces - closeBraces; i++) repaired += "}"
+      // Remove trailing comma, incomplete key-value pairs
+      repaired = repaired.replace(/,\s*"[^"]*"?\s*:?\s*"?[^"]*$/, "")
+      repaired = repaired.replace(/,\s*$/, "")
+      // Only close an unclosed string if the last quote has no matching close
+      const quoteCount = (repaired.match(/"/g) || []).length
+      if (quoteCount % 2 !== 0) repaired += '"'
+      // Recount after cleanup
+      const ob = (repaired.match(/{/g) || []).length
+      const cb = (repaired.match(/}/g) || []).length
+      const oq = (repaired.match(/\[/g) || []).length
+      const cq = (repaired.match(/\]/g) || []).length
+      for (let i = 0; i < oq - cq; i++) repaired += "]"
+      for (let i = 0; i < ob - cb; i++) repaired += "}"
 
       try {
         parsed = JSON.parse(repaired) as IntentResponse
