@@ -1,4 +1,4 @@
-import React from "react"
+import React, { useCallback, useState } from "react"
 import type { AgentState } from "../lib/types"
 import { StatusLamp } from "./StatusLamp"
 import { StatusBracket } from "./StatusBracket"
@@ -12,10 +12,23 @@ interface AgentCardProps {
 
 export function AgentCard({ agent, index, isBestDeal }: AgentCardProps) {
   const probeId = `PROBE-${String(index + 1).padStart(2, "0")}`
-  const isLive = agent.status === "streaming" && agent.streamingUrl
   const isDone = agent.status === "complete"
   const isNotFound = agent.status === "not_found"
   const isError = agent.status === "error"
+
+  // Track iframe loads — first load = live feed, second load = TinyFish completion page
+  const [iframeExpired, setIframeExpired] = useState(false)
+  const [loadCount, setLoadCount] = useState(0)
+  const handleIframeLoad = useCallback(() => {
+    setLoadCount(prev => {
+      const next = prev + 1
+      // After 2+ loads, TinyFish has redirected to completion page — hide iframe
+      if (next >= 2) setIframeExpired(true)
+      return next
+    })
+  }, [])
+
+  const isLive = agent.status === "streaming" && agent.streamingUrl && !iframeExpired
 
   return (
     <div className="bg-gradient-panel border border-border-strong shadow-bezel animate-boot-in">
@@ -51,25 +64,34 @@ export function AgentCard({ agent, index, isBestDeal }: AgentCardProps) {
         <span className="corner-bl" />
 
         {isLive && agent.streamingUrl ? (
-          <iframe
-            src={agent.streamingUrl}
-            className="absolute inset-0 w-full h-full border-0"
-            sandbox="allow-scripts allow-same-origin"
-            allow="autoplay"
-          />
-        ) : isLive ? (
-          <div className="absolute inset-0 overflow-hidden">
-            <div className="absolute inset-0 grid-paper opacity-40" />
-            <div className="absolute inset-x-0 h-8 bg-gradient-to-b from-phosphor/20 to-transparent animate-scanline-sweep pointer-events-none" />
-            <div className="absolute top-2 left-2 font-mono-display text-[9px] tracking-widest text-phosphor uppercase">
-              ◉ REC ▪ T+00:0{index + 3}
+          <>
+            <iframe
+              src={agent.streamingUrl}
+              className="absolute inset-0 w-full h-full border-0"
+              sandbox="allow-scripts allow-same-origin"
+              allow="autoplay"
+              onLoad={handleIframeLoad}
+            />
+            <div className="absolute inset-x-0 top-0 h-7 bg-gradient-to-b from-background to-transparent pointer-events-none z-20" />
+            <div className="absolute top-1.5 left-2 font-mono-display text-[9px] tracking-widest text-phosphor uppercase pointer-events-none z-20">
+              ◉ LIVE FEED ▪ {agent.site.toUpperCase()}
             </div>
-            <div className="absolute bottom-2 left-2 right-2 font-mono-display text-[9px] tracking-wider text-phosphor/80 uppercase truncate">
-              &gt; navigating...
-              <span className="animate-blink-cursor">▌</span>
+            <div className="absolute inset-x-0 bottom-0 h-7 bg-gradient-to-t from-background to-transparent pointer-events-none z-20" />
+            <div className="absolute bottom-1.5 right-2 font-mono-display text-[8px] tracking-wider text-muted-foreground/60 uppercase pointer-events-none z-20">
+              PROBE {String(index + 1).padStart(2, "0")} ▪ TELEMETRY
             </div>
-          </div>
+          </>
         ) : null}
+
+        {/* Session ended but no result yet — show processing state instead of TinyFish page */}
+        {iframeExpired && agent.status === "streaming" && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
+            <RadarSpinner />
+            <span className="font-mono-display text-[9px] tracking-[0.2em] uppercase text-primary">
+              PROCESSING TELEMETRY...
+            </span>
+          </div>
+        )}
 
         {isDone && agent.result && (
           <div className="absolute inset-0 flex flex-col items-center justify-center px-3 text-center">
@@ -118,7 +140,7 @@ export function AgentCard({ agent, index, isBestDeal }: AgentCardProps) {
           </div>
         )}
 
-        {(agent.status === "queued" || agent.status === "connecting") && (
+        {(agent.status === "queued" || (agent.status === "connecting")) && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
             {agent.status === "connecting" ? (
               <RadarSpinner />

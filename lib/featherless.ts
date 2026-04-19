@@ -6,7 +6,8 @@ const MODEL = "meta-llama/Meta-Llama-3.1-8B-Instruct"
 const DEFAULT_SITES = [
   { name: "Amazon", url: "https://www.amazon.com" },
   { name: "eBay", url: "https://www.ebay.com" },
-  { name: "Target", url: "https://www.target.com" }
+  { name: "Target", url: "https://www.target.com" },
+  { name: "Best Buy", url: "https://www.bestbuy.com" }
 ]
 
 const SYSTEM_PROMPT = `You are an intent extraction engine for a shopping comparison tool.

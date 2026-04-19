@@ -13,11 +13,11 @@ export interface OrchestratorCallbacks {
 const TARGET_SITES = [
   { name: "Amazon", url: "https://www.amazon.com" },
   { name: "eBay", url: "https://www.ebay.com" },
-  { name: "Target", url: "https://www.target.com" }
+  { name: "Target", url: "https://www.target.com" },
+  { name: "Best Buy", url: "https://www.bestbuy.com" }
 ]
 
 const BACKUP_SITES = [
-  { name: "Best Buy", url: "https://www.bestbuy.com" },
   { name: "Newegg", url: "https://www.newegg.com" },
   { name: "Costco", url: "https://www.costco.com" }
 ]
@@ -32,7 +32,7 @@ function tryFastExtract(capture: PageCapture): { product: string; price: string;
 
   let product = title
     .replace(/Amazon\.com:\s*/i, "")
-    .replace(/\s*[-|:].*(Amazon|Walmart|Target|eBay|Best Buy|Newegg).*$/i, "")
+    .replace(/\s*[-|:].*(Amazon|Target|eBay|Best Buy|Newegg|Costco).*$/i, "")
     .replace(/\s*\|.*$/, "")
     .replace(/\s*-\s*(Walmart|Target|eBay|Best Buy|Newegg).*$/i, "")
     .trim()
@@ -142,208 +142,137 @@ export async function orchestrate(
 ): Promise<void> {
   console.log("[FlashyAI:Orchestrator] === PIPELINE START ===")
 
+  const sourceDomain = new URL(capture.url).hostname.replace("www.", "")
+
   // Step 1: Fast extract for exact match (instant)
   const fastResult = tryFastExtract(capture)
 
+  let product: string
+  let basicIntent: ExtractedIntent
+
   if (!fastResult) {
-    // Can't even get a product name — fall back to full LLM path
-    console.log("[FlashyAI:Orchestrator] Fast extract failed, full LLM path...")
+    console.log("[FlashyAI:Orchestrator] Fast extract failed, using Featherless LLM...")
     try {
       const intentResponse = await extractIntent(featherlessKey, capture)
-      callbacks.onIntentExtracted(intentResponse.intent.type, intentResponse.intent.product)
-
-      // Use LLM-generated goals directly
-      await runExactAndCascade(intentResponse.intent, intentResponse.agentGoals, capture, featherlessKey, tinyfishKey, agents => agents, callbacks)
+      product = intentResponse.intent.product
+      basicIntent = intentResponse.intent
+      callbacks.onIntentExtracted(intentResponse.intent.type, product)
     } catch (err) {
       console.error("[FlashyAI:Orchestrator] LLM extraction failed:", err)
       callbacks.onError(`Intent extraction failed: ${err}`)
+      return
     }
-    return
+  } else {
+    product = fastResult.product
+    basicIntent = {
+      type: "product_search",
+      product,
+      attributes: {},
+      currentPrice: fastResult.price,
+      sourceSite: fastResult.hostname
+    }
+    callbacks.onIntentExtracted("product_search", product)
   }
 
-  const { product, price, hostname } = fastResult
-  callbacks.onIntentExtracted("product_search", product)
+  // Step 2: Build goals for BOTH exact and similar
+  const exactGoals = makeExactGoals(product, sourceDomain)
 
-  // Step 2: Launch exact match agents AND Featherless in parallel
-  const exactGoals = makeExactGoals(product, hostname)
-
-  console.log("[FlashyAI:Orchestrator] Launching exact match + Featherless LLM in parallel...")
-
-  // Start Featherless in the background (for smart similar goals later)
-  const richIntentPromise = extractIntent(featherlessKey, capture)
-    .then((resp) => {
-      console.log("[FlashyAI:Orchestrator] Featherless rich intent ready:", {
-        product: resp.intent.product,
-        category: resp.intent.category,
-        attributes: resp.intent.attributes,
-        price: resp.intent.currentPrice
+  // Get rich intent — reuse if we already called Featherless (fast path failed),
+  // otherwise fire in background
+  let richIntentPromise: Promise<ExtractedIntent | null>
+  if (!fastResult) {
+    // Already have intent from the blocking LLM call above — reuse it
+    richIntentPromise = Promise.resolve(basicIntent)
+  } else {
+    // Fast path succeeded — fire Featherless in background for rich data
+    richIntentPromise = extractIntent(featherlessKey, capture)
+      .then(resp => {
+        console.log("[FlashyAI:Orchestrator] Featherless rich intent ready:", {
+          product: resp.intent.product,
+          category: resp.intent.category,
+          attributes: resp.intent.attributes
+        })
+        return resp.intent
       })
-      return resp.intent
-    })
-    .catch((err) => {
-      console.warn("[FlashyAI:Orchestrator] Featherless failed (will use generic similar):", err)
-      return null
-    })
-
-  // Build a basic intent for fallback
-  const basicIntent: ExtractedIntent = {
-    type: "product_search",
-    product,
-    attributes: {},
-    currentPrice: price,
-    sourceSite: hostname
+      .catch(err => {
+        console.warn("[FlashyAI:Orchestrator] Featherless failed (using generic similar):", err)
+        return null
+      })
   }
 
-  await runExactAndCascade(
-    basicIntent,
-    exactGoals,
-    capture,
-    featherlessKey,
-    tinyfishKey,
-    // This function resolves the rich intent when needed for similar search
-    async () => {
-      const richIntent = await richIntentPromise
-      return richIntent || basicIntent
-    },
-    callbacks
-  )
-}
-
-async function runExactAndCascade(
-  basicIntent: ExtractedIntent,
-  exactGoals: AgentGoal[],
-  capture: PageCapture,
-  featherlessKey: string,
-  tinyfishKey: string,
-  resolveRichIntent: (() => Promise<ExtractedIntent>) | ((agents: AgentState[]) => AgentState[]),
-  callbacks: OrchestratorCallbacks
-): Promise<void> {
-  // Dispatch exact match agents
-  console.log("[FlashyAI:Orchestrator] Dispatching exact match agents...")
-  const agents: AgentState[] = exactGoals.map((goal, i) => ({
-    id: `exact-${i}`,
-    site: goal.site,
-    status: "queued" as const,
-    matchType: "exact" as const
-  }))
-  callbacks.onAgentUpdate([...agents])
-
-  const { promise: exactPromise } = dispatchAgents(
-    tinyfishKey,
-    exactGoals,
-    (siteId, update) => {
-      const agent = agents.find((a) => a.site === siteId && a.matchType === "exact")
-      if (agent) {
-        if (update.status) agent.status = update.status as AgentState["status"]
-        if (update.streamingUrl) agent.streamingUrl = update.streamingUrl
-        if (update.result) { agent.result = update.result; agent.streamingUrl = undefined }
-        if (update.error) { agent.error = update.error; agent.streamingUrl = undefined }
-        callbacks.onAgentUpdate([...agents])
-      }
-    }
+  // All sites for similar search (target + backup, excluding source)
+  const allSimilarSites = [...TARGET_SITES, ...BACKUP_SITES].filter(
+    s => !new URL(s.url).hostname.replace("www.", "").includes(sourceDomain)
   )
 
-  await exactPromise
-  console.log("[FlashyAI:Orchestrator] Exact results:", agents.map(a => ({
-    site: a.site, found: !isNotFound(a), price: a.result?.price
-  })))
+  // Resolve rich intent for smart similar goals
+  const richIntent = (await richIntentPromise) || basicIntent
+  const hasRichData = Object.keys(richIntent.attributes || {}).length > 0 || richIntent.category
+  const similarGoals = allSimilarSites.map(site =>
+    hasRichData
+      ? makeSmartSimilarGoal(richIntent, site)
+      : makeGenericSimilarGoal(richIntent.product, site)
+  )
 
-  // Identify not-found sites
-  const notFoundAgents = agents.filter(a => isNotFound(a))
-  const foundAgents = agents.filter(a => !isNotFound(a))
-
-  for (const agent of notFoundAgents) {
-    agent.status = "not_found"
-  }
-  callbacks.onAgentUpdate([...agents])
-
-  console.log("[FlashyAI:Orchestrator] Found:", foundAgents.map(a => a.site), "Not found:", notFoundAgents.map(a => a.site))
-
-  // Determine which sites need similar search
-  const sitesForSimilar = notFoundAgents.map(a => {
-    return [...TARGET_SITES, ...BACKUP_SITES].find(s => s.name === a.site)!
-  }).filter(Boolean)
-
-  // If ALL sites failed, expand to backup sites
-  if (foundAgents.length === 0) {
-    console.log("[FlashyAI:Orchestrator] All exact matches failed — expanding to backup sites")
-    const sourceDomain = new URL(capture.url).hostname.replace("www.", "")
-    const unusedBackups = BACKUP_SITES.filter(
-      s => !agents.some(a => a.site === s.name) &&
-           !new URL(s.url).hostname.replace("www.", "").includes(sourceDomain)
-    )
-    sitesForSimilar.push(...unusedBackups)
-  }
-
-  if (sitesForSimilar.length > 0) {
-    console.log("[FlashyAI:Orchestrator] Cascading to similar search on:", sitesForSimilar.map(s => s.name))
-    callbacks.onSimilarSearchStart()
-
-    // Resolve rich intent from Featherless (should be ready by now since exact match took time)
-    let richIntent: ExtractedIntent = basicIntent
-    if (typeof resolveRichIntent === "function") {
-      try {
-        const resolved = await (resolveRichIntent as () => Promise<ExtractedIntent>)()
-        if (resolved) richIntent = resolved
-      } catch {
-        // Use basic intent as fallback
-      }
-    }
-
-    console.log("[FlashyAI:Orchestrator] Using intent for similar search:", {
-      product: richIntent.product,
-      category: richIntent.category,
-      attributes: richIntent.attributes,
-      price: richIntent.currentPrice
-    })
-
-    // Generate smart similar goals using rich intent
-    const hasRichData = Object.keys(richIntent.attributes || {}).length > 0 || richIntent.category
-    const similarGoals = sitesForSimilar.map(site =>
-      hasRichData
-        ? makeSmartSimilarGoal(richIntent, site)
-        : makeGenericSimilarGoal(richIntent.product, site)
-    )
-
-    console.log("[FlashyAI:Orchestrator] Similar goals:", similarGoals.map(g => ({
-      site: g.site,
-      goal: g.goal.slice(0, 120) + "..."
-    })))
-
-    const similarAgents: AgentState[] = similarGoals.map((goal, i) => ({
+  // Step 3: Initialize ALL agents — exact + similar
+  const agents: AgentState[] = [
+    ...exactGoals.map((goal, i) => ({
+      id: `exact-${i}`,
+      site: goal.site,
+      status: "queued" as const,
+      matchType: "exact" as const
+    })),
+    ...similarGoals.map((goal, i) => ({
       id: `similar-${i}`,
       site: goal.site,
       status: "queued" as const,
       matchType: "similar" as const
     }))
+  ]
+  callbacks.onAgentUpdate([...agents])
+  callbacks.onSimilarSearchStart()
 
-    agents.push(...similarAgents)
-    callbacks.onAgentUpdate([...agents])
+  console.log("[FlashyAI:Orchestrator] Dispatching ALL probes in parallel:", {
+    exact: exactGoals.map(g => g.site),
+    similar: similarGoals.map(g => g.site)
+  })
 
-    const { promise: similarPromise } = dispatchAgents(
-      tinyfishKey,
-      similarGoals,
-      (siteId, update) => {
-        const agent = agents.find(a => a.site === siteId && a.matchType === "similar")
-        if (agent) {
-          if (update.status) agent.status = update.status as AgentState["status"]
-          if (update.streamingUrl) agent.streamingUrl = update.streamingUrl
-          if (update.result) agent.result = update.result
-          if (update.error) agent.error = update.error
-          callbacks.onAgentUpdate([...agents])
-        }
-      }
-    )
-
-    await similarPromise
-    console.log("[FlashyAI:Orchestrator] Similar results:",
-      agents.filter(a => a.matchType === "similar").map(a => ({
-        site: a.site, found: !isNotFound(a), price: a.result?.price, product: a.result?.product
-      }))
-    )
+  // Helper to update agent state
+  const updateAgent = (siteId: string, matchType: string, update: Partial<{ status: string; streamingUrl: string; result: AgentResult; error: string }>) => {
+    const agent = agents.find(a => a.site === siteId && a.matchType === matchType)
+    if (agent) {
+      if (update.status) agent.status = update.status as AgentState["status"]
+      if (update.streamingUrl) agent.streamingUrl = update.streamingUrl
+      if (update.result) { agent.result = update.result; agent.streamingUrl = undefined }
+      if (update.error) { agent.error = update.error; agent.streamingUrl = undefined }
+      callbacks.onAgentUpdate([...agents])
+    }
   }
 
-  console.log("[FlashyAI:Orchestrator] === PIPELINE COMPLETE ===")
+  // Step 4: Dispatch BOTH exact and similar in parallel
+  const { promise: exactPromise } = dispatchAgents(
+    tinyfishKey, exactGoals,
+    (siteId, update) => updateAgent(siteId, "exact", update)
+  )
+
+  const { promise: similarPromise } = dispatchAgents(
+    tinyfishKey, similarGoals,
+    (siteId, update) => updateAgent(siteId, "similar", update)
+  )
+
+  await Promise.all([exactPromise, similarPromise])
+
+  // Mark exact not-found agents
+  for (const agent of agents) {
+    if (agent.matchType === "exact" && isNotFound(agent)) {
+      agent.status = "not_found"
+    }
+  }
+  callbacks.onAgentUpdate([...agents])
+
+  console.log("[FlashyAI:Orchestrator] === PIPELINE COMPLETE ===", agents.map(a => ({
+    site: a.site, matchType: a.matchType, status: a.status, price: a.result?.price
+  })))
   callbacks.onComplete([...agents])
 }
 

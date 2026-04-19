@@ -112,8 +112,10 @@ export async function runTinyFishAgent(
             console.log(`[FlashyAI:TinyFish] [${goal.site}] Step:`, msg)
             callbacks?.onStep?.(msg)
           } else if (data.type === "COMPLETE") {
-            console.log(`[FlashyAI:TinyFish] [${goal.site}] COMPLETE. Raw result:`, resultData)
-            result = parseResult(resultData)
+            // TinyFish returns result in various fields — try them all
+            const rawResult = resultData || data.output || data.data || data
+            console.log(`[FlashyAI:TinyFish] [${goal.site}] COMPLETE. Raw result:`, JSON.stringify(rawResult).slice(0, 500))
+            result = parseResult(rawResult)
             console.log(`[FlashyAI:TinyFish] [${goal.site}] Parsed result:`, result)
             callbacks?.onComplete?.(result)
           } else if (data.type === "ERROR") {
@@ -136,24 +138,105 @@ export async function runTinyFishAgent(
 
   if (!result) {
     console.warn(`[FlashyAI:TinyFish] [${goal.site}] Stream ended with no result. Chunks: ${chunkCount}, Events: ${eventCount}`)
+    // Stream ended without a COMPLETE event — treat as not found
+    callbacks?.onError?.(`No result from ${goal.site} (session ended)`)
   }
 
   return result
 }
 
+/**
+ * Flatten a nested TinyFish result into a flat key-value map.
+ * TinyFish returns varied formats like:
+ *   { best_match: "...", details: { price: "$29", url: "..." } }
+ *   { product: "...", price: "$29" }
+ *   { results: [{ name: "...", price: "$29" }] }
+ */
+function flattenObj(obj: Record<string, unknown>, prefix = ""): Record<string, unknown> {
+  const flat: Record<string, unknown> = {}
+  for (const [key, val] of Object.entries(obj)) {
+    const fullKey = prefix ? `${prefix}.${key}` : key
+    if (val && typeof val === "object" && !Array.isArray(val)) {
+      Object.assign(flat, flattenObj(val as Record<string, unknown>, fullKey))
+    } else if (Array.isArray(val) && val.length > 0 && typeof val[0] === "object") {
+      // Take first array element (e.g., results[0])
+      Object.assign(flat, flattenObj(val[0] as Record<string, unknown>, fullKey))
+    } else {
+      flat[fullKey] = val
+      flat[key] = val // also store without prefix for key matching
+    }
+  }
+  return flat
+}
+
 function parseResult(raw: unknown): AgentResult {
-  if (!raw || typeof raw !== "object") {
-    return { raw }
+  if (!raw) return { raw }
+
+  if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw)
+      if (typeof parsed === "object") return parseResult(parsed)
+    } catch {
+      const priceMatch = raw.match(/\$[\d,]+\.?\d*/)?.[0]
+      return { product: raw.slice(0, 100), price: priceMatch || "", raw }
+    }
   }
 
-  const obj = raw as Record<string, unknown>
-  return {
-    product: String(obj.product || obj.name || obj.title || ""),
-    price: String(obj.price || obj.cost || ""),
-    available: obj.available !== false && obj.in_stock !== false,
-    url: String(obj.url || obj.link || ""),
-    raw
+  if (typeof raw !== "object") return { raw }
+
+  // Flatten nested objects so we can find fields regardless of nesting
+  const flat = flattenObj(raw as Record<string, unknown>)
+
+  // Search for price
+  let price = ""
+  const priceKeys = ["price", "cost", "current_price", "currentPrice", "sale_price", "salePrice", "list_price", "retail_price"]
+  for (const key of priceKeys) {
+    const val = flat[key]
+    if (val && String(val) !== "undefined" && String(val) !== "null" && String(val) !== "" && String(val) !== "N/A") {
+      price = String(val)
+      // Ensure it looks like a price
+      if (!price.includes("$")) {
+        const num = parseFloat(price.replace(/[^0-9.]/g, ""))
+        if (!isNaN(num)) price = `$${num.toFixed(2)}`
+      }
+      break
+    }
   }
+  // Fallback: scan all values for a dollar amount
+  if (!price) {
+    for (const val of Object.values(flat)) {
+      if (typeof val === "string") {
+        const match = val.match(/\$[\d,]+\.?\d*/)
+        if (match) { price = match[0]; break }
+      }
+    }
+  }
+
+  // Search for product name
+  const nameKeys = ["product", "name", "title", "product_name", "productName", "item", "item_name", "best_match", "match", "description"]
+  let product = ""
+  for (const key of nameKeys) {
+    const val = flat[key]
+    if (val && typeof val === "string" && val !== "undefined" && val !== "") {
+      product = val
+      break
+    }
+  }
+
+  // Search for URL
+  let url = ""
+  for (const val of Object.values(flat)) {
+    if (typeof val === "string" && val.startsWith("http")) {
+      url = val
+      break
+    }
+  }
+
+  const available = flat.available !== false && flat.in_stock !== false && flat.inStock !== false && flat.exact_match !== false
+
+  console.log(`[FlashyAI:TinyFish] parseResult:`, { product, price, available, url, rawKeys: Object.keys(obj) })
+
+  return { product, price, available, url, raw }
 }
 
 /**
@@ -168,9 +251,7 @@ export function dispatchAgents(
     result: AgentResult
     error: string
   }>) => void
-): { promise: Promise<(AgentResult | null)[]>; abort: () => void } {
-  const controller = new AbortController()
-
+): { promise: Promise<(AgentResult | null)[]> } {
   console.log(`[FlashyAI:TinyFish] Dispatching ${goals.length} agents:`, goals.map(g => g.site))
 
   const promises = goals.map((goal) => {
@@ -196,7 +277,6 @@ export function dispatchAgents(
   })
 
   return {
-    promise: Promise.all(promises),
-    abort: () => controller.abort()
+    promise: Promise.all(promises)
   }
 }

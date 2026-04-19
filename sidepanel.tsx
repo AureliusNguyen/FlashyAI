@@ -306,7 +306,7 @@ function SidePanel() {
           <div className="mt-2 font-mono-display text-[8px] tracking-[0.2em] uppercase text-muted-foreground/40 text-center leading-relaxed">
             COMPATIBLE TARGETS:<br />
             AMAZON ▪ EBAY ▪ TARGET ▪ BEST BUY<br />
-            BEST BUY ▪ NEWEGG ▪ COSTCO ▪ ETSY
+            NEWEGG ▪ COSTCO ▪ NIKE ▪ ETSY
           </div>
         </div>
       )}
