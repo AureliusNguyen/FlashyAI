@@ -2,6 +2,35 @@ import { extractIntent } from "./featherless"
 import { dispatchAgents } from "./tinyfish"
 import type { AgentGoal, AgentResult, AgentState, ExtractedIntent, IntentResponse, PageCapture } from "./types"
 
+/**
+ * Simplify a verbose product title into core search keywords.
+ * "NFL Echo Dot Bundle: Includes Echo Dot | Deep Sea Blue and Limited-Edition NFL Helmet Stand | Cleveland Browns"
+ * → "Echo Dot NFL Helmet Stand"
+ */
+function simplifyProductName(fullName: string): string {
+  let name = fullName
+    // Remove pipe-separated sections after the first meaningful chunk
+    .split("|")[0]
+    // Remove colon-separated suffixes like "Includes Echo Dot (5th Gen)"
+    .split(":").slice(0, 2).join(" ")
+    // Remove parenthetical details like "(5th Gen, 2022 release)"
+    .replace(/\([^)]*\)/g, "")
+    // Remove common filler words
+    .replace(/\b(includes|with|and|the|for|in|a|an|of|by)\b/gi, "")
+    // Remove extra whitespace
+    .replace(/\s+/g, " ")
+    .trim()
+
+  // If still too long (>60 chars), take first 5 significant words
+  if (name.length > 60) {
+    const words = name.split(" ").filter(w => w.length > 2)
+    name = words.slice(0, 5).join(" ")
+  }
+
+  console.log("[FlashyAI:Orchestrator] Simplified product name:", { from: fullName.slice(0, 60), to: name })
+  return name
+}
+
 export interface OrchestratorCallbacks {
   onIntentExtracted: (intent: string, product: string) => void
   onAgentUpdate: (agents: AgentState[]) => void
@@ -86,6 +115,7 @@ function tryFastExtract(capture: PageCapture): { product: string; price: string;
  */
 function makeExactGoals(product: string, sourceHostname: string, attributes?: Record<string, string>): AgentGoal[] {
   const today = new Date().toLocaleDateString("en-US")
+  const searchQuery = simplifyProductName(product)
   const filteredSites = TARGET_SITES.filter(
     (s) => !new URL(s.url).hostname.replace("www.", "").includes(sourceHostname)
   )
@@ -106,16 +136,17 @@ function makeExactGoals(product: string, sourceHostname: string, attributes?: Re
 
 CONTEXT:
 - Product: ${product}
+- Search Keywords: ${searchQuery}
 - Search Date: ${today}
 ${attrContext}
 STEP 1 - NAVIGATE TO SEARCH:
 If not already on a search results page, find and click the search bar.
-Type "${product}" and press Enter. Wait for results to load.
+Type "${searchQuery}" and press Enter. Wait for results to load.
 Handle any popups or cookie banners by dismissing them.
 
 STEP 2 - LOCATE THE PRODUCT:
-Look through the search results for a product matching "${product}".
-Click on the first result that closely matches the product name.
+Look through the search results for a product similar to "${product}".
+Click on the first result that closely matches. It does NOT need to be an exact name match — find the closest equivalent product.
 Wait for the product detail page to load.
 ${filterInstructions}
 
@@ -158,6 +189,10 @@ function makeSmartSimilarGoal(
     ? attrs.map(([k, v]) => `${k}: ${v}`).join(", ")
     : "none specified"
 
+  const searchQuery = intent.category
+    ? simplifyProductName(intent.product)
+    : simplifyProductName(intent.product)
+
   return {
     site: site.name,
     url: site.url,
@@ -171,7 +206,7 @@ CONTEXT:
 - Search Date: ${today}
 
 STEP 1 - SEARCH FOR ALTERNATIVES:
-Search for "${intent.category || intent.product}" in the search bar.
+Search for "${searchQuery}" in the search bar.
 Handle any popups or cookie banners by dismissing them.
 
 STEP 2 - FIND BEST MATCH:
@@ -210,6 +245,7 @@ IMPORTANT: Return ONLY the JSON object, no additional text.`
  */
 function makeGenericSimilarGoal(product: string, site: { name: string; url: string }): AgentGoal {
   const today = new Date().toLocaleDateString("en-US")
+  const searchQuery = simplifyProductName(product)
   return {
     site: site.name,
     url: site.url,
@@ -220,7 +256,7 @@ CONTEXT:
 - Search Date: ${today}
 
 STEP 1 - SEARCH:
-Find the search bar, type "${product}", press Enter. Dismiss any popups.
+Find the search bar, type "${searchQuery}", press Enter. Dismiss any popups.
 
 STEP 2 - FIND BEST ALTERNATIVE:
 Browse the first page of results (max 10 items).
@@ -259,7 +295,7 @@ function isNotFound(agent: AgentState): boolean {
 }
 
 // Exported for testing
-export { tryFastExtract, makeExactGoals, makeSmartSimilarGoal, isNotFound }
+export { tryFastExtract, makeExactGoals, makeSmartSimilarGoal, isNotFound, simplifyProductName }
 
 /**
  * Full orchestration pipeline — parallel dispatch:
